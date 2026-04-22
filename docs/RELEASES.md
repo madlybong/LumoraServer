@@ -29,6 +29,21 @@ The repo includes GitHub Actions workflows for:
 - version consistency checks
 - release packaging and publish-ready npm workflow on tags like `v0.1.0`
 
+## npm registry setup
+
+The package is configured for the public npm registry:
+
+- registry: `https://registry.npmjs.org/`
+- package: `@astrake/lumora`
+- publish access: `public`
+
+Repository publishing expects:
+
+- GitHub Actions secret: `NPM_TOKEN`
+- optional local login via `npm login --registry=https://registry.npmjs.org/`
+
+The repo-level [`.npmrc`](../.npmrc) and package `publishConfig` both point to npmjs.
+
 ## Release flow
 
 1. Update [`VERSION`](../VERSION)

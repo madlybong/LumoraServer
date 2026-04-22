@@ -1,6 +1,8 @@
 {
   "name": "@astrake/lumora",
   "version": "0.1.0",
+  "description": "Slim Bun + Hono framework with typed config, file-based resources, generated CRUD, realtime, and an init wizard.",
+  "license": "MIT",
   "type": "module",
   "main": "./src/index.ts",
   "bin": {
@@ -12,6 +14,18 @@
   "scripts": {
     "build": "bun build ./src/index.ts ./bin/init.ts --outdir ./dist",
     "check": "tsc -p ./tsconfig.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/madlybong/lumora.git"
+  },
+  "homepage": "https://github.com/madlybong/lumora",
+  "bugs": {
+    "url": "https://github.com/madlybong/lumora/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "dependencies": {
     "hono": "^4.9.7"
