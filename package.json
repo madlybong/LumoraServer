@@ -1,0 +1,23 @@
+{
+  "name": "lumora",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "bun@1.3.12",
+  "workspaces": [
+    "packages/core",
+    "apps/starter"
+  ],
+  "scripts": {
+    "build": "bun run ./tools/build.ts",
+    "check": "bun run ./tools/check.ts",
+    "dev": "bun run ./apps/starter/src/index.ts",
+    "test": "bun test",
+    "cli": "bun run ./packages/core/bin/init.ts",
+    "version:sync": "bun run ./tools/version.ts",
+    "version:check": "bun run ./tools/version.ts && git diff --exit-code"
+  },
+  "devDependencies": {
+    "bun-types": "^1.3.12",
+    "typescript": "^5.9.3"
+  }
+}

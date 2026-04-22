@@ -1,0 +1,271 @@
+import { SQL } from "bun";
+import type {
+  DefineResourceResult,
+  LumoraDatabaseConfig,
+  LumoraEventMap,
+  RequestAudit,
+  ResourceEventPayload,
+  ResourceField,
+  TransactionEventPayload,
+  TypedEventEmitter
+} from "./types";
+
+interface ListOptions {
+  filters: URLSearchParams;
+  sort?: string;
+  page: number;
+  pageSize: number;
+}
+
+function quoteIdentifier(identifier: string): string {
+  return `\`${identifier.replace(/`/g, "")}\``;
+}
+
+function sqlTextType(client: LumoraDatabaseConfig["client"], field: ResourceField): string {
+  switch (field.type) {
+    case "number":
+      return client === "mysql" ? "DOUBLE" : "REAL";
+    case "boolean":
+      return client === "mysql" ? "BOOLEAN" : "INTEGER";
+    case "json":
+      return client === "mysql" ? "JSON" : "TEXT";
+    case "datetime":
+      return client === "mysql" ? "DATETIME" : "TEXT";
+    case "string":
+    default:
+      return "TEXT";
+  }
+}
+
+function escapeValue(value: unknown, field?: ResourceField): string {
+  if (value === null || value === undefined) {
+    return "NULL";
+  }
+  if (field?.type === "json") {
+    return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
+  }
+  if (field?.type === "boolean") {
+    return value ? "1" : "0";
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : "NULL";
+  }
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function normalizeRecord(record: Record<string, unknown>, resource: DefineResourceResult): Record<string, unknown> {
+  const normalized: Record<string, unknown> = {
+    id: record.id,
+    createdAt: record.created_at ?? record.createdAt,
+    updatedAt: record.updated_at ?? record.updatedAt
+  };
+
+  for (const [fieldName, field] of Object.entries(resource.fields)) {
+    const raw = record[fieldName];
+    if (field.type === "boolean") {
+      normalized[fieldName] = raw === true || raw === 1 || raw === "1";
+    } else if (field.type === "number") {
+      normalized[fieldName] = raw === null || raw === undefined ? raw : Number(raw);
+    } else if (field.type === "json" && typeof raw === "string") {
+      try {
+        normalized[fieldName] = JSON.parse(raw);
+      } catch {
+        normalized[fieldName] = raw;
+      }
+    } else {
+      normalized[fieldName] = raw;
+    }
+  }
+
+  return normalized;
+}
+
+function buildWhereClause(resource: DefineResourceResult, filters: URLSearchParams): string[] {
+  const filterable = new Set(resource.query?.filterable ?? Object.keys(resource.fields).filter((key) => resource.fields[key].filterable));
+  const clauses: string[] = [];
+
+  for (const [key, value] of filters.entries()) {
+    if (!filterable.has(key)) {
+      continue;
+    }
+    clauses.push(`${quoteIdentifier(key)} = ${escapeValue(value, resource.fields[key])}`);
+  }
+
+  return clauses;
+}
+
+function buildSortClause(resource: DefineResourceResult, sort?: string): string {
+  if (!sort) {
+    return "ORDER BY updated_at DESC";
+  }
+
+  const descending = sort.startsWith("-");
+  const field = descending ? sort.slice(1) : sort;
+  const sortable = new Set(resource.query?.sortable ?? Object.keys(resource.fields).filter((key) => resource.fields[key].sortable));
+
+  if (!sortable.has(field)) {
+    return "ORDER BY updated_at DESC";
+  }
+
+  return `ORDER BY ${quoteIdentifier(field)} ${descending ? "DESC" : "ASC"}`;
+}
+
+function buildTransactionPayload(resource: DefineResourceResult, action: TransactionEventPayload["action"], sql: string): TransactionEventPayload {
+  return {
+    resource: resource.resource,
+    action,
+    sql
+  };
+}
+
+export class LumoraDatabase {
+  readonly sql: SQL;
+
+  constructor(
+    private readonly config: LumoraDatabaseConfig,
+    private readonly events: TypedEventEmitter<LumoraEventMap>
+  ) {
+    this.sql = new SQL(config.url, config.client === "mysql" ? { adapter: "mysql" } : { adapter: "sqlite" });
+  }
+
+  async connect(): Promise<void> {
+    await this.sql.connect();
+  }
+
+  async close(): Promise<void> {
+    await this.sql.close();
+  }
+
+  async ensureResource(resource: DefineResourceResult): Promise<void> {
+    const table = quoteIdentifier(resource.table ?? resource.resource);
+    const fieldLines = Object.entries(resource.fields).map(([name, field]) => {
+      const suffix = field.required ? " NOT NULL" : "";
+      return `${quoteIdentifier(name)} ${sqlTextType(this.config.client, field)}${suffix}`;
+    });
+    const ddl = [
+      `CREATE TABLE IF NOT EXISTS ${table} (`,
+      `${quoteIdentifier("id")} VARCHAR(191) PRIMARY KEY,`,
+      ...fieldLines.map((line) => `${line},`),
+      `${quoteIdentifier("created_at")} TEXT NOT NULL,`,
+      `${quoteIdentifier("updated_at")} TEXT NOT NULL`,
+      ")"
+    ].join(" ");
+    await this.sql.unsafe(ddl);
+  }
+
+  async list(resource: DefineResourceResult, options: ListOptions): Promise<{ items: Record<string, unknown>[]; page: number; pageSize: number }> {
+    const table = quoteIdentifier(resource.table ?? resource.resource);
+    const where = buildWhereClause(resource, options.filters);
+    const clause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+    const sort = buildSortClause(resource, options.sort);
+    const offset = (options.page - 1) * options.pageSize;
+    const query = `SELECT * FROM ${table} ${clause} ${sort} LIMIT ${options.pageSize} OFFSET ${offset}`;
+    const rows = await this.sql.unsafe<Record<string, unknown>[]>(query);
+    return {
+      items: rows.map((row) => normalizeRecord(row, resource)),
+      page: options.page,
+      pageSize: options.pageSize
+    };
+  }
+
+  async get(resource: DefineResourceResult, id: string): Promise<Record<string, unknown> | null> {
+    const table = quoteIdentifier(resource.table ?? resource.resource);
+    const query = `SELECT * FROM ${table} WHERE id = ${escapeValue(id)} LIMIT 1`;
+    const rows = await this.sql.unsafe<Record<string, unknown>[]>(query);
+    return rows[0] ? normalizeRecord(rows[0], resource) : null;
+  }
+
+  async create(
+    resource: DefineResourceResult,
+    input: Record<string, unknown>,
+    audit?: RequestAudit
+  ): Promise<Record<string, unknown>> {
+    const table = quoteIdentifier(resource.table ?? resource.resource);
+    const now = new Date().toISOString();
+    const id = crypto.randomUUID();
+    const record = {
+      id,
+      ...input,
+      created_at: now,
+      updated_at: now
+    };
+    const columns = Object.keys(record).map(quoteIdentifier).join(", ");
+    const values = Object.entries(record)
+      .map(([key, value]) => escapeValue(value, key in resource.fields ? resource.fields[key] : undefined))
+      .join(", ");
+    const query = `INSERT INTO ${table} (${columns}) VALUES (${values})`;
+    const tx = buildTransactionPayload(resource, "create", query);
+    this.events.emit("db:transaction:before", tx);
+
+    try {
+      await this.sql.begin(async (sql) => {
+        await sql.unsafe(query);
+      });
+      this.events.emit("db:transaction:after", tx);
+      return normalizeRecord(record, resource);
+    } catch (error) {
+      this.events.emit("db:transaction:rollback", { ...tx, error: String(error) });
+      throw error;
+    }
+  }
+
+  async update(
+    resource: DefineResourceResult,
+    id: string,
+    input: Record<string, unknown>,
+    audit?: RequestAudit
+  ): Promise<Record<string, unknown> | null> {
+    const existing = await this.get(resource, id);
+    if (!existing) {
+      return null;
+    }
+
+    const table = quoteIdentifier(resource.table ?? resource.resource);
+    const updatedAt = new Date().toISOString();
+    const assignments = Object.entries(input)
+      .map(([key, value]) => `${quoteIdentifier(key)} = ${escapeValue(value, resource.fields[key])}`)
+      .concat(`${quoteIdentifier("updated_at")} = ${escapeValue(updatedAt)}`)
+      .join(", ");
+    const query = `UPDATE ${table} SET ${assignments} WHERE id = ${escapeValue(id)}`;
+    const tx = buildTransactionPayload(resource, "update", query);
+    this.events.emit("db:transaction:before", tx);
+
+    try {
+      await this.sql.begin(async (sql) => {
+        await sql.unsafe(query);
+      });
+      this.events.emit("db:transaction:after", tx);
+      return {
+        ...existing,
+        ...input,
+        updatedAt
+      };
+    } catch (error) {
+      this.events.emit("db:transaction:rollback", { ...tx, error: String(error) });
+      throw error;
+    }
+  }
+
+  async delete(resource: DefineResourceResult, id: string, audit?: RequestAudit): Promise<Record<string, unknown> | null> {
+    const existing = await this.get(resource, id);
+    if (!existing) {
+      return null;
+    }
+
+    const table = quoteIdentifier(resource.table ?? resource.resource);
+    const query = `DELETE FROM ${table} WHERE id = ${escapeValue(id)}`;
+    const tx = buildTransactionPayload(resource, "delete", query);
+    this.events.emit("db:transaction:before", tx);
+
+    try {
+      await this.sql.begin(async (sql) => {
+        await sql.unsafe(query);
+      });
+      this.events.emit("db:transaction:after", tx);
+      return existing;
+    } catch (error) {
+      this.events.emit("db:transaction:rollback", { ...tx, error: String(error) });
+      throw error;
+    }
+  }
+}

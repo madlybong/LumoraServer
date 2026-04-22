@@ -1,0 +1,30 @@
+name: Version Check
+
+on:
+  pull_request:
+    paths:
+      - "VERSION"
+      - "package.json"
+      - "packages/core/package.json"
+      - "tools/version.ts"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.12
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Sync versions
+        run: bun run version:sync
+
+      - name: Ensure VERSION is the single source of truth
+        run: git diff --exit-code

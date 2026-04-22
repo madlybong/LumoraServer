@@ -1,0 +1,14 @@
+{
+  "name": "@lumora/starter",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "dev": "bun run ./src/index.ts",
+    "build": "bun build ./src/index.ts --outdir ./dist",
+    "check": "tsc -p ./tsconfig.json"
+  },
+  "dependencies": {
+    "@astrake/lumora": "workspace:*"
+  }
+}
