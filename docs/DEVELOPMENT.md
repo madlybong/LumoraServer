@@ -1,4 +1,4 @@
-# Development Workflow
+# Development Workflow — `@astrake/lumora-server`
 
 ## Local setup
 
@@ -26,6 +26,24 @@ Build the active projects:
 
 ```bash
 bun run build
+```
+
+Sync versions from `VERSION`:
+
+```bash
+bun run version:sync
+```
+
+Generate a changelog entry for the current version:
+
+```bash
+bun run changelog
+```
+
+Prepare a release (sync + changelog in one step):
+
+```bash
+bun run release:prep
 ```
 
 ## Repo conventions

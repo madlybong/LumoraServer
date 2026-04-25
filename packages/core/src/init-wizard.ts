@@ -55,7 +55,7 @@ export async function scaffoldLumoraProject(targetDir: string, answers: InitAnsw
   currentPackage.type ??= "module";
   currentPackage.dependencies = {
     ...(currentPackage.dependencies ?? {}),
-    "@astrake/lumora": "latest"
+    "@astrake/lumora-server": "latest"
   };
   currentPackage.scripts = {
     ...(currentPackage.scripts ?? {}),
@@ -80,7 +80,7 @@ export async function scaffoldLumoraProject(targetDir: string, answers: InitAnsw
   );
   await writeFile(
     path.join(targetDir, "lumora.config.ts"),
-    `import { defineLumoraConfig } from "@astrake/lumora";
+    `import { defineLumoraConfig } from "@astrake/lumora-server";
 
 export default defineLumoraConfig({
   name: ${JSON.stringify(answers.projectName)},
@@ -102,7 +102,7 @@ export default defineLumoraConfig({
   );
   await writeFile(
     path.join(targetDir, answers.routesDir, "company.ts"),
-    `import { defineResource } from "@astrake/lumora";
+    `import { defineResource } from "@astrake/lumora-server";
 
 export default defineResource({
   resource: "company",
@@ -120,7 +120,7 @@ export default defineResource({
   );
   await writeFile(
     path.join(targetDir, "src", "index.ts"),
-    `import { initLumora } from "@astrake/lumora";
+    `import { initLumora } from "@astrake/lumora-server";
 
 const lumora = await initLumora("./lumora.config.ts");
 

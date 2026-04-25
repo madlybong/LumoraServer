@@ -9,6 +9,6 @@
     "check": "tsc -p ./tsconfig.json"
   },
   "dependencies": {
-    "@astrake/lumora": "workspace:*"
+    "@astrake/lumora-server": "workspace:*"
   }
 }

@@ -1,58 +1,99 @@
-# Releases
+# Releases — `@astrake/lumora-server`
 
 ## Version source of truth
 
-Lumora now uses the root [`VERSION`](../VERSION) file as the centralized version source.
+`@astrake/lumora-server` uses the root [`VERSION`](../VERSION) file as the single
+centralized version source. All `package.json` files in the workspace are derived from it.
 
-The following files are synchronized from it:
+The following files are synchronized:
 
-- [`package.json`](../package.json)
-- [`packages/core/package.json`](../packages/core/package.json)
+- [`package.json`](../package.json) — workspace root
+- [`packages/core/package.json`](../packages/core/package.json) — published package
+- [`apps/starter/package.json`](../apps/starter/package.json) — reference app (if versioned)
 
-Run:
+**Sync command:**
 
 ```bash
 bun run version:sync
 ```
 
-To verify the repo is version-clean:
+**Verify the repo is version-clean:**
 
 ```bash
 bun run version:check
 ```
 
-## Git workflows
+---
 
-The repo includes GitHub Actions workflows for:
+## Automated Release Flow
 
-- CI on pushes and pull requests
-- version consistency checks
-- release packaging and publish-ready npm workflow on tags like `v0.1.0`
+Releases are **fully automated** via the `release.yml` GitHub Actions workflow.
 
-## npm registry setup
+### Trigger: VERSION bump on `main`
 
-The package is configured for the public npm registry:
+The recommended release flow is:
 
-- registry: `https://registry.npmjs.org/`
-- package: `@astrake/lumora`
-- publish access: `public`
+1. Update the [`VERSION`](../VERSION) file (e.g., `0.1.0` → `0.2.0`).
+2. Run `bun run release:prep` locally to sync versions and preview the changelog.
+3. Commit: `git commit -am "chore(release): bump version to 0.2.0"`.
+4. Push to `main`.
 
-Repository publishing expects:
+The workflow then automatically:
 
-- GitHub Actions secret: `NPM_TOKEN`
-- optional local login via `npm login --registry=https://registry.npmjs.org/`
+1. Detects the `VERSION` file change.
+2. Installs dependencies and syncs all package versions.
+3. Runs the full test suite.
+4. Builds the package.
+5. Generates and commits an updated `CHANGELOG.md`.
+6. Creates a `vX.Y.Z` git tag.
+7. Creates a **GitHub Release** with the changelog excerpt and `.tgz` artifact attached.
+8. Publishes `@astrake/lumora-server` to the public npm registry.
 
-The repo-level [`.npmrc`](../.npmrc) and package `publishConfig` both point to npmjs.
+### Trigger: Manual tag push
 
-## Release flow
+You can also trigger a release by pushing a `v*` tag manually:
 
-1. Update [`VERSION`](../VERSION)
-2. Run `bun run version:sync`
-3. Run `bun run check`
-4. Run `bun test`
-5. Run `bun run build`
-6. Commit the version bump
-7. Tag the release as `vX.Y.Z`
-8. Push branch and tag
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
 
-The release workflow will build, test, create a package artifact, and publish if `NPM_TOKEN` is configured.
+---
+
+## npm Registry Setup
+
+| Setting | Value |
+|---------|-------|
+| Registry | `https://registry.npmjs.org/` |
+| Package | `@astrake/lumora-server` |
+| Scope | `@astrake` |
+| Access | `public` |
+
+**Required GitHub secret:** `NPM_TOKEN`
+
+Add it at: `https://github.com/madlybong/LumoraServer/settings/secrets/actions`
+
+---
+
+## Changelog Generation
+
+The `tools/changelog.ts` script generates changelog entries automatically:
+
+```bash
+bun run changelog
+```
+
+It reads git log since the last tag, groups commits by [Conventional Commits](https://www.conventionalcommits.org/) prefix,
+and prepends a new `## [X.Y.Z] — YYYY-MM-DD` section to `CHANGELOG.md`.
+
+**Commit prefix → section mapping:**
+
+| Prefix | Section |
+|--------|---------|
+| `feat:` | Added |
+| `fix:` | Fixed |
+| `perf:`, `refactor:` | Changed |
+| `docs:` | Documentation |
+| `chore:`, `ci:`, `build:` | Maintenance |
+| `BREAKING CHANGE` | ⚠ Breaking Changes |
+

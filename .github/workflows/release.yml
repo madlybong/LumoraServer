@@ -1,60 +1,112 @@
 name: Release
 
+# Triggers:
+#   1. Push of a version tag (v*) — manual tag release
+#   2. Push to main that modifies the VERSION file — automatic release on version bump
 on:
   push:
     tags:
       - "v*"
+    branches:
+      - main
+    paths:
+      - "VERSION"
   workflow_dispatch:
 
+permissions:
+  contents: write   # required to create GitHub Releases and push tags
+
 jobs:
-  publish:
+  release:
+    name: Build · Changelog · Publish
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - name: Checkout (full history for changelog)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.12
+          bun-version: "1.3.12"
 
-      - name: Setup Node for npm registry
+      - name: Setup Node (npm registry auth)
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: "22"
           registry-url: https://registry.npmjs.org
 
-      - name: Install
+      - name: Cache Bun install
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      - name: Install dependencies
         run: bun install --frozen-lockfile
 
       - name: Sync versions
-        run: bun ./tools/version.ts
+        run: bun run version:sync
 
-      - name: Verify version state
+      - name: Verify clean tree
         run: git diff --exit-code
 
-      - name: Test
+      - name: Run tests
         run: bun test
 
-      - name: Build
+      - name: Build package
+        run: bun run build
+
+      - name: Generate changelog
+        run: bun run changelog
+
+      - name: Extract version
+        id: ver
+        run: echo "version=$(cat VERSION | tr -d '[:space:]')" >> $GITHUB_OUTPUT
+
+      - name: Configure git for tagging
         run: |
-          bun build ./packages/core/src/index.ts ./packages/core/bin/init.ts --target bun --outdir ./packages/core/dist
-          bun build ./apps/starter/src/index.ts --target bun --outdir ./apps/starter/dist
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit changelog update
+        run: |
+          git add CHANGELOG.md
+          git diff --cached --quiet || git commit -m "chore(release): update CHANGELOG for v${{ steps.ver.outputs.version }}"
+
+      - name: Create and push version tag
+        # Only create a new tag if not already triggered by a tag push
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          git tag "v${{ steps.ver.outputs.version }}"
+          git push origin "v${{ steps.ver.outputs.version }}"
+          git push origin main
+
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        run: |
+          awk '/^## \[${{ steps.ver.outputs.version }}\]/{flag=1; next} /^## (Unreleased|\[)/{if(flag) exit} flag' \
+            CHANGELOG.md > release_notes.txt
+          cat release_notes.txt
 
       - name: Pack package
         working-directory: packages/core
         run: bun pm pack
 
-      - name: Upload package artifact
-        uses: actions/upload-artifact@v4
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: astrake-lumora-package
-          path: packages/core/*.tgz
+          tag_name: "v${{ steps.ver.outputs.version }}"
+          name: "v${{ steps.ver.outputs.version }}"
+          body_path: release_notes.txt
+          files: packages/core/*.tgz
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish to npm
-        if: startsWith(github.ref, 'refs/tags/v')
         working-directory: packages/core
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

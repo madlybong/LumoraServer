@@ -1,7 +1,8 @@
 {
-  "name": "@astrake/lumora",
+  "name": "@astrake/lumora-server",
   "version": "0.1.0",
-  "description": "Slim Bun + Hono framework with typed config, file-based resources, generated CRUD, realtime, and an init wizard.",
+  "description": "Slim Bun + Hono framework — typed config, file-based resources, auto-generated REST/SSE/WebSocket endpoints, JWT auth, SQLite, and an interactive init wizard.",
+  "author": "Anuvab Chakraborty (https://github.com/madlybong)",
   "license": "MIT",
   "type": "module",
   "main": "./src/index.ts",
@@ -11,21 +12,38 @@
   "exports": {
     ".": "./src/index.ts"
   },
-  "scripts": {
-    "build": "bun build ./src/index.ts ./bin/init.ts --outdir ./dist",
-    "check": "tsc -p ./tsconfig.json"
-  },
+  "keywords": [
+    "bun",
+    "hono",
+    "framework",
+    "rest",
+    "api",
+    "sse",
+    "websocket",
+    "sqlite",
+    "typescript",
+    "lumora",
+    "astrake"
+  ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/madlybong/lumora.git"
+    "url": "https://github.com/madlybong/LumoraServer.git"
   },
-  "homepage": "https://github.com/madlybong/lumora",
+  "homepage": "https://server.lumora.astrake.com",
   "bugs": {
-    "url": "https://github.com/madlybong/lumora/issues"
+    "url": "https://github.com/madlybong/LumoraServer/issues"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/madlybong"
   },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts ./bin/init.ts --outdir ./dist",
+    "check": "tsc -p ./tsconfig.json"
   },
   "dependencies": {
     "hono": "^4.9.7"

@@ -2,7 +2,7 @@
 
 ## Near term
 
-- polish the `bunx init @astrake/lumora` experience
+- polish the `bunx init @astrake/lumora-server` experience
 - improve generated docs UI beyond the current simple dev page
 - strengthen JWT validation and auth ergonomics
 - improve query/filter validation and error reporting

@@ -1,4 +1,4 @@
-import { initLumora } from "@astrake/lumora";
+import { initLumora } from "@astrake/lumora-server";
 
 const lumora = await initLumora("./apps/starter/lumora.config.ts");
 

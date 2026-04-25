@@ -1,6 +1,6 @@
-# Project Overview
+# Project Overview — `@astrake/lumora-server`
 
-## What Lumora is
+## What Lumora Server is
 
 Lumora is a slim Bun + Hono framework for parent applications that want:
 
@@ -17,7 +17,7 @@ The framework is intentionally smaller than the earlier scaffold. It no longer c
 
 Lumora is aiming for a clean developer experience:
 
-1. run `bunx init @astrake/lumora`
+1. run `bunx init @astrake/lumora-server`
 2. answer setup questions
 3. get `lumora.config.ts`, starter route files, and a working Bun app
 4. add resource files and let Lumora generate API surfaces
@@ -25,7 +25,7 @@ Lumora is aiming for a clean developer experience:
 ## Current repo shape
 
 - `packages/core`
-  The published framework package `@astrake/lumora`
+  The published framework package `@astrake/lumora-server`
 - `apps/starter`
   The reference Bun application
 - `tools`

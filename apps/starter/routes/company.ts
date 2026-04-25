@@ -1,4 +1,4 @@
-import { defineResource } from "@astrake/lumora";
+import { defineResource } from "@astrake/lumora-server";
 
 export default defineResource({
   resource: "company",

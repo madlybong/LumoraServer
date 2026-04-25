@@ -7,7 +7,7 @@ This document helps coding agents make aligned changes without re-deriving the c
 ## High-confidence facts
 
 - The active workspace is intentionally small.
-- The only active framework package is `packages/core`, published as `@astrake/lumora`.
+- The only active framework package is `packages/core`, published as `@astrake/lumora-server`.
 - The only active example app is `apps/starter`.
 - The framework is config-first and resource-first.
 - The framework is no longer plugin-centric and no longer includes built-in jobs/workers as a main concept.

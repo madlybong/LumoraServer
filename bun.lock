@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "lumora",
+      "name": "lumora-server-workspace",
       "devDependencies": {
         "bun-types": "^1.3.12",
         "typescript": "^5.9.3",
@@ -13,11 +13,11 @@
       "name": "@lumora/starter",
       "version": "0.1.0",
       "dependencies": {
-        "@astrake/lumora": "workspace:*",
+        "@astrake/lumora-server": "workspace:*",
       },
     },
     "packages/core": {
-      "name": "@astrake/lumora",
+      "name": "@astrake/lumora-server",
       "version": "0.1.0",
       "bin": {
         "init": "./bin/init.ts",
@@ -28,7 +28,7 @@
     },
   },
   "packages": {
-    "@astrake/lumora": ["@astrake/lumora@workspace:packages/core"],
+    "@astrake/lumora-server": ["@astrake/lumora-server@workspace:packages/core"],
 
     "@lumora/starter": ["@lumora/starter@workspace:apps/starter"],
 
@@ -36,7 +36,7 @@
 
     "bun-types": ["bun-types@1.3.13", "", { "dependencies": { "@types/node": "*" } }, "sha512-QXKeHLlOLqQX9LgYaHJfzdBaV21T63HhFJnvuRCcjZiaUDpbs5ED1MgxbMra71CsryN/1dAoXuJJJwIv/2drVA=="],
 
-    "hono": ["hono@4.12.14", "", {}, "sha512-am5zfg3yu6sqn5yjKBNqhnTX7Cv+m00ox+7jbaKkrLMRJ4rAdldd1xPd/JzbBWspqaQv6RSTrgFN95EsfhC+7w=="],
+    "hono": ["hono@4.12.15", "", {}, "sha512-qM0jDhFEaCBb4TxoW7f53Qrpv9RBiayUHo0S52JudprkhvpjIrGoU1mnnr29Fvd1U335ZFPZQY1wlkqgfGXyLg=="],
 
     "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 

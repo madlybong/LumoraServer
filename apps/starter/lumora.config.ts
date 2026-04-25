@@ -1,4 +1,4 @@
-import { defineLumoraConfig } from "@astrake/lumora";
+import { defineLumoraConfig } from "@astrake/lumora-server";
 
 export default defineLumoraConfig({
   name: "lumora-starter",

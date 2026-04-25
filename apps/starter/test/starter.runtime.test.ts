@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { initLumora } from "@astrake/lumora";
+import { initLumora } from "@astrake/lumora-server";
 
 describe("starter runtime", () => {
   test("boots from typed lumora config", async () => {
