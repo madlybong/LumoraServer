@@ -1,6 +1,6 @@
 {
   "name": "lumora-server-workspace",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "Monorepo workspace for @astrake/lumora-server — Bun + Hono typed API framework.",
   "author": "Anuvab Chakraborty (https://github.com/madlybong)",

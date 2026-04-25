@@ -1,6 +1,6 @@
 {
   "name": "@astrake/lumora-server",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Slim Bun + Hono framework — typed config, file-based resources, auto-generated REST/SSE/WebSocket endpoints, JWT auth, SQLite, and an interactive init wizard.",
   "author": "Anuvab Chakraborty (https://github.com/madlybong)",
   "license": "MIT",
