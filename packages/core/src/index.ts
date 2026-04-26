@@ -5,3 +5,5 @@ export * from "./init-wizard";
 export * from "./resource";
 export * from "./runtime";
 export * from "./types";
+export * from "./email";
+export * from "./ai";

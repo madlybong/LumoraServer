@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## [0.1.6] — 2026-04-25
+
+### Added
+
+- **Resource Permission Hooks**: Added per-method permission guards to `defineResource()` allowing developers to define `permissions` on a resource schema. The runtime enforces these via a `checkPermission` helper in all CRUD handlers, returning 403 if a guard throws or returns a Response.
+- **Audit Trail**: Introduced automated system audit trails. When `audit: true` is set on a resource, the runtime automatically writes immutable logs to a system-managed `_audit_logs` table (SQL) covering `POST`, `PUT`, and `DELETE` actions.
+- **SMTP Email Plugin**: Integrated an optional `email` service using `nodemailer`. Supports static credentials or DB-backed settings read dynamically at runtime.
+- **AI Provider Plugin**: Added a lightweight, zero-SDK `ai` service wrapper that provides `complete()` and `test()` methods. Supports Gemini, OpenAI, and custom OpenAI-compatible base URLs.
+
 ---
 
 ## [0.1.5] — 2026-04-25

@@ -1,6 +1,6 @@
 {
   "name": "@astrake/lumora-server",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Slim Bun + Hono framework — typed config, file-based resources, auto-generated REST/SSE/WebSocket endpoints, JWT auth, SQLite, and an interactive init wizard.",
   "author": "Anuvab Chakraborty (https://github.com/madlybong)",
   "license": "MIT",
@@ -55,6 +55,10 @@
     "check": "tsc -p ./tsconfig.json"
   },
   "dependencies": {
-    "hono": "^4.9.7"
+    "hono": "^4.9.7",
+    "nodemailer": "^8.0.6"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^8.0.0"
   }
 }

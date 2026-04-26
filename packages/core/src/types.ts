@@ -1,5 +1,7 @@
 import type { BunWebSocketHandler } from "hono/bun";
 import type { Hono } from "hono";
+import type { LumoraEmailConfig, LumoraEmailService } from "./email";
+import type { LumoraAIConfig, LumoraAIService } from "./ai";
 
 export type LumoraMode = "development" | "production" | "test";
 
@@ -43,6 +45,36 @@ export interface ResourceHooks<TFields extends ResourceFields = ResourceFields> 
   afterDelete?(record: Record<string, unknown>): Promise<void> | void;
 }
 
+export type ResourceMethod = "GET_LIST" | "GET_ONE" | "POST" | "PUT" | "DELETE";
+
+export interface ResourcePermissionContext {
+  method: ResourceMethod;
+  auth: LumoraAuthResult | undefined;
+  id?: string;
+}
+
+export type ResourcePermissionGuard = (
+  ctx: ResourcePermissionContext
+) => void | Promise<void>;
+
+export type ResourcePermissions = Partial<
+  Record<ResourceMethod, ResourcePermissionGuard>
+>;
+
+export interface AuditLogRecord {
+  id: string;
+  resource: string;
+  action: "create" | "update" | "delete";
+  record_id: string;
+  actor_subject: string;
+  actor_strategy: string;
+  old_value: string;
+  new_value: string;
+  request_id: string;
+  request_path: string;
+  timestamp: string;
+}
+
 export interface ResourceMeta {
   title?: string;
   description?: string;
@@ -63,6 +95,8 @@ export interface ResourceSchema<TFields extends ResourceFields = ResourceFields>
   query?: ResourceQueryOptions;
   hooks?: ResourceHooks<TFields>;
   meta?: ResourceMeta;
+  permissions?: ResourcePermissions;
+  audit?: boolean;
 }
 
 export interface DefineResourceResult<TFields extends ResourceFields = ResourceFields> extends ResourceSchema<TFields> {
@@ -106,6 +140,8 @@ export interface LumoraConfig {
     enabled?: boolean;
     path?: string;
   };
+  email?: LumoraEmailConfig;
+  ai?: LumoraAIConfig;
 }
 
 export interface ResolvedLumoraConfig extends LumoraConfig {
@@ -193,6 +229,8 @@ export interface LumoraInstance {
     path: string;
     openApiPath: string;
   };
+  email?: LumoraEmailService;
+  ai?: LumoraAIService;
   close(): Promise<void>;
 }
 

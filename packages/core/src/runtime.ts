@@ -10,6 +10,8 @@ import { loadLumoraConfig } from "./config";
 import { LumoraDatabase } from "./db";
 import { LumoraRealtimeHub } from "./realtime";
 import { normalizeResourcePath } from "./resource";
+import { createEmailService } from "./email";
+import { createAIService } from "./ai";
 import type {
   DefineResourceResult,
   LumoraConfig,
@@ -17,7 +19,9 @@ import type {
   LumoraInstance,
   RequestAudit,
   ResourceEventPayload,
-  ResolvedLumoraConfig
+  ResolvedLumoraConfig,
+  ResourceMethod,
+  LumoraAuthResult
 } from "./types";
 
 type AppVariables = {
@@ -124,6 +128,50 @@ async function authorizeOrRespond(
   }
 }
 
+async function checkPermission(
+  resource: DefineResourceResult,
+  method: ResourceMethod,
+  auth: LumoraAuthResult | undefined,
+  id?: string
+): Promise<Response | undefined> {
+  const guard = resource.permissions?.[method];
+  if (!guard) return undefined;
+  try {
+    await guard({ method, auth, id });
+  } catch (err) {
+    return new Response(
+      JSON.stringify({ ok: false, error: String(err) }),
+      { status: 403, headers: { "Content-Type": "application/json" } }
+    );
+  }
+  return undefined;
+}
+
+async function writeAudit(
+  database: LumoraDatabase,
+  resource: DefineResourceResult,
+  action: "create" | "update" | "delete",
+  auth: LumoraAuthResult | undefined,
+  audit: RequestAudit,
+  oldValue: Record<string, unknown>,
+  newValue: Record<string, unknown>,
+  recordId: string
+): Promise<void> {
+  if (!resource.audit) return;
+  await database.writeAuditLog({
+    resource: resource.resource,
+    action,
+    record_id: recordId,
+    actor_subject: auth?.subject ?? "anonymous",
+    actor_strategy: auth?.strategy ?? "none",
+    old_value: JSON.stringify(oldValue),
+    new_value: JSON.stringify(newValue),
+    request_id: audit.requestId,
+    request_path: audit.path,
+    timestamp: new Date().toISOString(),
+  });
+}
+
 export async function initLumora(configOrPath: LumoraConfig | string): Promise<LumoraInstance> {
   const config = await loadLumoraConfig(configOrPath);
   const events = new LumoraEventEmitter<LumoraEventMap>();
@@ -139,6 +187,16 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
   });
 
   await database.connect();
+  await database.ensureAuditTable();
+
+  const emailService = config.email
+    ? createEmailService(config.email, database.sql)
+    : undefined;
+
+  const aiService = config.ai
+    ? createAIService(config.ai, database.sql)
+    : undefined;
+
   events.emit("lifecycle:init", { config });
 
   for (const resource of resources) {
@@ -150,6 +208,8 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       if (auth instanceof Response) {
         return auth;
       }
+      const denied = await checkPermission(resource, "GET_LIST", auth);
+      if (denied) return denied;
       const page = Number(c.req.query("page") ?? 1);
       const pageSize = Math.min(
         Number(c.req.query("pageSize") ?? resource.query?.defaultPageSize ?? 20),
@@ -169,6 +229,8 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       if (auth instanceof Response) {
         return auth;
       }
+      const denied = await checkPermission(resource, "POST", auth);
+      if (denied) return denied;
       const requestId = c.get("requestId");
       const payload = validatePayload(resource, parseBody(await c.req.json().catch(() => ({}))), "create");
       const input = resource.hooks?.beforeCreate ? await resource.hooks.beforeCreate({ input: payload, auth, resource }) : payload;
@@ -176,6 +238,7 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       const beforePayload: ResourceEventPayload = { resource: resource.resource, action: "created", record: input, audit };
       events.emit("resource:create:before", beforePayload);
       const record = await database.create(resource, input, audit);
+      await writeAudit(database, resource, "create", auth, audit, {}, record, record.id as string);
       await resource.hooks?.afterCreate?.(record);
       const eventPayload: ResourceEventPayload = { resource: resource.resource, action: "created", record, audit };
       events.emit("resource:create:after", eventPayload);
@@ -188,17 +251,21 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       if (auth instanceof Response) {
         return auth;
       }
+      const denied = await checkPermission(resource, "PUT", auth, c.req.param("id"));
+      if (denied) return denied;
       const requestId = c.get("requestId");
       const payload = validatePayload(resource, parseBody(await c.req.json().catch(() => ({}))), "update");
       const input = resource.hooks?.beforeUpdate
         ? await resource.hooks.beforeUpdate({ id: c.req.param("id"), input: payload, auth, resource })
         : payload;
       const audit = buildAudit("PUT", new URL(c.req.url).pathname, requestId);
+      const existingSnapshot = await database.get(resource, c.req.param("id")) || {};
       events.emit("resource:update:before", { resource: resource.resource, action: "updated", record: input, audit });
       const record = await database.update(resource, c.req.param("id"), input, audit);
       if (!record) {
         return c.json({ ok: false, error: "Not found" }, 404);
       }
+      await writeAudit(database, resource, "update", auth, audit, existingSnapshot, record, c.req.param("id"));
       await resource.hooks?.afterUpdate?.(record);
       const eventPayload: ResourceEventPayload = { resource: resource.resource, action: "updated", record, audit };
       events.emit("resource:update:after", eventPayload);
@@ -211,6 +278,8 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       if (auth instanceof Response) {
         return auth;
       }
+      const denied = await checkPermission(resource, "DELETE", auth, c.req.param("id"));
+      if (denied) return denied;
       const requestId = c.get("requestId");
       const audit = buildAudit("DELETE", new URL(c.req.url).pathname, requestId);
       await resource.hooks?.beforeDelete?.({ id: c.req.param("id"), input: {}, auth, resource });
@@ -219,6 +288,7 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       if (!record) {
         return c.json({ ok: false, error: "Not found" }, 404);
       }
+      await writeAudit(database, resource, "delete", auth, audit, record, {}, record.id as string);
       await resource.hooks?.afterDelete?.(record);
       const eventPayload: ResourceEventPayload = { resource: resource.resource, action: "deleted", record, audit };
       events.emit("resource:delete:after", eventPayload);
@@ -260,6 +330,8 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       if (auth instanceof Response) {
         return auth;
       }
+      const denied = await checkPermission(resource, "GET_ONE", auth, c.req.param("id"));
+      if (denied) return denied;
       const record = await database.get(resource, c.req.param("id"));
       if (!record) {
         return c.json({ ok: false, error: "Not found" }, 404);
@@ -285,6 +357,8 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
     config,
     events,
     realtime,
+    email: emailService,
+    ai: aiService,
     docs: {
       openapi,
       path: config.docs.path,

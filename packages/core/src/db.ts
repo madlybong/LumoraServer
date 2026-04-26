@@ -7,7 +7,8 @@ import type {
   ResourceEventPayload,
   ResourceField,
   TransactionEventPayload,
-  TypedEventEmitter
+  TypedEventEmitter,
+  AuditLogRecord
 } from "./types";
 
 interface ListOptions {
@@ -267,5 +268,34 @@ export class LumoraDatabase {
       this.events.emit("db:transaction:rollback", { ...tx, error: String(error) });
       throw error;
     }
+  }
+
+  async ensureAuditTable(): Promise<void> {
+    const ddl = `
+      CREATE TABLE IF NOT EXISTS \`_audit_logs\` (
+        \`id\` VARCHAR(191) PRIMARY KEY,
+        \`resource\` TEXT NOT NULL,
+        \`action\` TEXT NOT NULL,
+        \`record_id\` TEXT NOT NULL,
+        \`actor_subject\` TEXT NOT NULL,
+        \`actor_strategy\` TEXT NOT NULL,
+        \`old_value\` TEXT NOT NULL,
+        \`new_value\` TEXT NOT NULL,
+        \`request_id\` TEXT NOT NULL,
+        \`request_path\` TEXT NOT NULL,
+        \`timestamp\` TEXT NOT NULL
+      )`;
+    await this.sql.unsafe(ddl);
+  }
+
+  async writeAuditLog(entry: Omit<AuditLogRecord, "id">): Promise<void> {
+    const id = crypto.randomUUID();
+    const columns = Object.keys({ id, ...entry }).map(quoteIdentifier).join(", ");
+    const values = Object.values({ id, ...entry })
+      .map((v) => escapeValue(v))
+      .join(", ");
+    await this.sql.unsafe(
+      `INSERT INTO \`_audit_logs\` (${columns}) VALUES (${values})`
+    );
   }
 }
