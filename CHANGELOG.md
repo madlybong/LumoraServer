@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+---
+
+## [0.1.6] — 2026-04-26
+
+### Added
+
+- release 0.1.6 with permission hooks, audit trail, email and ai plugins (`c4b6112`)
+
+
 ## [0.1.6] — 2026-04-25
 
 ### Added
