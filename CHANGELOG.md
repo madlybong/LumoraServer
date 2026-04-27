@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+---
+
+## [0.1.7] — 2026-04-27
+
+### Added
+
+- release 0.1.7 with dev-server logger and exposed database (`30b0dab`)
+
+
 ## [0.1.7] — 2026-04-28
 
 ### Added
