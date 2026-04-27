@@ -12,6 +12,7 @@ import { LumoraRealtimeHub } from "./realtime";
 import { normalizeResourcePath } from "./resource";
 import { createEmailService } from "./email";
 import { createAIService } from "./ai";
+import { LumoraLogger } from "./logger";
 import type {
   DefineResourceResult,
   LumoraConfig,
@@ -180,10 +181,14 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
   const resources = await loadResources(config);
   const { upgradeWebSocket, websocket } = createBunWebSocket();
   const app = new Hono<{ Variables: AppVariables }>();
+  const logger = new LumoraLogger(config.logging.level);
 
   app.use("*", async (c, next) => {
-    c.set("requestId", crypto.randomUUID());
+    const requestId = crypto.randomUUID();
+    c.set("requestId", requestId);
+    const start = Date.now();
     await next();
+    logger.request(c.req.method, new URL(c.req.url).pathname, c.res.status, Date.now() - start, requestId);
   });
 
   await database.connect();
@@ -197,6 +202,7 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
     ? createAIService(config.ai, database.sql)
     : undefined;
 
+  logger.event("init", "starting lumora instance...");
   events.emit("lifecycle:init", { config });
 
   for (const resource of resources) {
@@ -204,11 +210,17 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
     const resourceBase = `${apiPrefix(config)}/${normalizeResourcePath(resource.resource)}`.replace(/\/+/g, "/");
 
     app.get(resourceBase, async (c) => {
-      const auth = await authorizeOrRespond(config, resource, c);
+      const auth = await authorize(config, resource, c).catch((err) => {
+        logger.error("auth", err, c.get("requestId"));
+        return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
+      });
       if (auth instanceof Response) {
         return auth;
       }
-      const denied = await checkPermission(resource, "GET_LIST", auth);
+      const denied = await checkPermission(resource, "GET_LIST", auth).catch((err) => {
+        logger.error("permit", err, c.get("requestId"));
+        return err instanceof Response ? err : new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 403, headers: { "Content-Type": "application/json" } });
+      });
       if (denied) return denied;
       const page = Number(c.req.query("page") ?? 1);
       const pageSize = Math.min(
@@ -225,11 +237,17 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
     });
 
     app.post(resourceBase, async (c) => {
-      const auth = await authorizeOrRespond(config, resource, c);
+      const auth = await authorize(config, resource, c).catch((err) => {
+        logger.error("auth", err, c.get("requestId"));
+        return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
+      });
       if (auth instanceof Response) {
         return auth;
       }
-      const denied = await checkPermission(resource, "POST", auth);
+      const denied = await checkPermission(resource, "POST", auth).catch((err) => {
+        logger.error("permit", err, c.get("requestId"));
+        return err instanceof Response ? err : new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 403, headers: { "Content-Type": "application/json" } });
+      });
       if (denied) return denied;
       const requestId = c.get("requestId");
       const payload = validatePayload(resource, parseBody(await c.req.json().catch(() => ({}))), "create");
@@ -247,11 +265,17 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
     });
 
     app.put(`${resourceBase}/:id`, async (c) => {
-      const auth = await authorizeOrRespond(config, resource, c);
+      const auth = await authorize(config, resource, c).catch((err) => {
+        logger.error("auth", err, c.get("requestId"));
+        return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
+      });
       if (auth instanceof Response) {
         return auth;
       }
-      const denied = await checkPermission(resource, "PUT", auth, c.req.param("id"));
+      const denied = await checkPermission(resource, "PUT", auth, c.req.param("id")).catch((err) => {
+        logger.error("permit", err, c.get("requestId"));
+        return err instanceof Response ? err : new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 403, headers: { "Content-Type": "application/json" } });
+      });
       if (denied) return denied;
       const requestId = c.get("requestId");
       const payload = validatePayload(resource, parseBody(await c.req.json().catch(() => ({}))), "update");
@@ -274,11 +298,17 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
     });
 
     app.delete(`${resourceBase}/:id`, async (c) => {
-      const auth = await authorizeOrRespond(config, resource, c);
+      const auth = await authorize(config, resource, c).catch((err) => {
+        logger.error("auth", err, c.get("requestId"));
+        return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
+      });
       if (auth instanceof Response) {
         return auth;
       }
-      const denied = await checkPermission(resource, "DELETE", auth, c.req.param("id"));
+      const denied = await checkPermission(resource, "DELETE", auth, c.req.param("id")).catch((err) => {
+        logger.error("permit", err, c.get("requestId"));
+        return err instanceof Response ? err : new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 403, headers: { "Content-Type": "application/json" } });
+      });
       if (denied) return denied;
       const requestId = c.get("requestId");
       const audit = buildAudit("DELETE", new URL(c.req.url).pathname, requestId);
@@ -326,11 +356,17 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
     );
 
     app.get(`${resourceBase}/:id`, async (c) => {
-      const auth = await authorizeOrRespond(config, resource, c);
+      const auth = await authorize(config, resource, c).catch((err) => {
+        logger.error("auth", err, c.get("requestId"));
+        return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
+      });
       if (auth instanceof Response) {
         return auth;
       }
-      const denied = await checkPermission(resource, "GET_ONE", auth, c.req.param("id"));
+      const denied = await checkPermission(resource, "GET_ONE", auth, c.req.param("id")).catch((err) => {
+        logger.error("permit", err, c.get("requestId"));
+        return err instanceof Response ? err : new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 403, headers: { "Content-Type": "application/json" } });
+      });
       if (denied) return denied;
       const record = await database.get(resource, c.req.param("id"));
       if (!record) {
@@ -348,6 +384,7 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
 
   app.get("/health", (c) => c.json({ ok: true, name: config.name, resources: resources.length }));
 
+  logger.banner(config, resources);
   events.emit("lifecycle:ready", { resources: resources.map((resource) => resource.resource) });
 
   return {
@@ -364,8 +401,10 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       path: config.docs.path,
       openApiPath: config.docs.openApiPath
     },
+    database,
     async close() {
       await database.close();
+      logger.event("close", "lumora instance closed");
       events.emit("lifecycle:close", { name: config.name });
     }
   };

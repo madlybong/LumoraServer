@@ -142,6 +142,9 @@ export interface LumoraConfig {
   };
   email?: LumoraEmailConfig;
   ai?: LumoraAIConfig;
+  logging?: {
+    level?: "silent" | "minimal" | "verbose";
+  };
 }
 
 export interface ResolvedLumoraConfig extends LumoraConfig {
@@ -157,6 +160,9 @@ export interface ResolvedLumoraConfig extends LumoraConfig {
   realtime: {
     sseSuffix: string;
     websocketSuffix: string;
+  };
+  logging: {
+    level: "silent" | "minimal" | "verbose";
   };
 }
 
@@ -231,6 +237,7 @@ export interface LumoraInstance {
   };
   email?: LumoraEmailService;
   ai?: LumoraAIService;
+  database: import("./db").LumoraDatabase;
   close(): Promise<void>;
 }
 

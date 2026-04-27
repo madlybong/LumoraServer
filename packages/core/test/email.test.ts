@@ -45,7 +45,9 @@ describe("Email Plugin", () => {
   test("Missing db config throws error", async () => {
     const svc = createEmailService({
       source: "db",
-      table: "settings"
+      table: "settings",
+      keyColumn: "key",
+      valueColumn: "value"
     });
     
     let err = "";

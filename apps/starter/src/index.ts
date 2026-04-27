@@ -7,5 +7,3 @@ const server = Bun.serve({
   fetch: lumora.fetch,
   websocket: lumora.websocket
 });
-
-console.log(`Lumora starter listening on http://localhost:${server.port}`);

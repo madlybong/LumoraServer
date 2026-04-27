@@ -43,6 +43,11 @@ export function resolveLumoraConfig(config: LumoraConfig, rootDir: string): Reso
     realtime: {
       sseSuffix: config.realtime?.sseSuffix ?? "events",
       websocketSuffix: config.realtime?.websocketSuffix ?? "ws"
+    },
+    logging: {
+      level: config.logging?.level ?? (
+        config.mode === "development" ? "verbose" : config.mode === "production" ? "minimal" : "silent"
+      )
     }
   };
 }

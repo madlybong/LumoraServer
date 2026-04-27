@@ -2,14 +2,14 @@
 
 ## Unreleased
 
----
-
-## [0.1.6] — 2026-04-26
+## [0.1.7] — 2026-04-28
 
 ### Added
 
-- release 0.1.6 with permission hooks, audit trail, email and ai plugins (`c4b6112`)
-
+- **Structured Dev-Server Logger**: Added a built-in zero-dependency terminal logger. In `development` mode, it prints a rich ASCII startup banner showing port, DB, and resource routes, followed by a colored per-request HTTP access log with duration and status.
+- **Configurable Logging Levels**: Added `logging: { level: "silent" | "minimal" | "verbose" }` to `LumoraConfig`. Defaults to `verbose` in dev, `minimal` in prod (startup/errors only), and `silent` in tests.
+- **Exposed Database Access**: `LumoraInstance` now exposes the internal `database` property (`LumoraDatabase`), allowing parent applications to perform custom raw SQL queries directly using the internal connection.
+- **Exported `LumoraDatabase`**: Added `LumoraDatabase` class export from the public root index to allow for clean typing when parent apps access the internal database instance.
 
 ## [0.1.6] — 2026-04-25
 

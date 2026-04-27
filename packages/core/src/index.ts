@@ -7,3 +7,5 @@ export * from "./runtime";
 export * from "./types";
 export * from "./email";
 export * from "./ai";
+export * from "./logger";
+export { LumoraDatabase } from "./db";
