@@ -15,6 +15,10 @@ export interface ResourceField {
   sortable?: boolean;
   searchable?: boolean;
   default?: unknown;
+  hidden?: boolean;
+  readOnly?: boolean;
+  unique?: boolean;
+  indexed?: boolean;
 }
 
 export interface ResourceQueryOptions {
@@ -34,6 +38,7 @@ export interface ResourceHookContext<TFields extends ResourceFields = ResourceFi
   id?: string;
   auth?: LumoraAuthResult;
   resource: ResourceSchema<TFields>;
+  database: import("./db").LumoraDatabase;
 }
 
 export interface ResourceHooks<TFields extends ResourceFields = ResourceFields> {
@@ -45,7 +50,7 @@ export interface ResourceHooks<TFields extends ResourceFields = ResourceFields> 
   afterDelete?(record: Record<string, unknown>): Promise<void> | void;
 }
 
-export type ResourceMethod = "GET_LIST" | "GET_ONE" | "POST" | "PUT" | "DELETE";
+export type ResourceMethod = "GET_LIST" | "GET_ONE" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 export interface ResourcePermissionContext {
   method: ResourceMethod;
@@ -59,7 +64,9 @@ export type ResourcePermissionGuard = (
 
 export type ResourcePermissions = Partial<
   Record<ResourceMethod, ResourcePermissionGuard>
->;
+> & {
+  roles?: Partial<Record<ResourceMethod, string[]>>;
+};
 
 export interface AuditLogRecord {
   id: string;
@@ -145,6 +152,12 @@ export interface LumoraConfig {
   logging?: {
     level?: "silent" | "minimal" | "verbose";
   };
+  cors?: {
+    origin?: string | string[];
+    methods?: string[];
+    headers?: string[];
+    credentials?: boolean;
+  };
 }
 
 export interface ResolvedLumoraConfig extends LumoraConfig {
@@ -163,6 +176,12 @@ export interface ResolvedLumoraConfig extends LumoraConfig {
   };
   logging: {
     level: "silent" | "minimal" | "verbose";
+  };
+  cors: {
+    origin: string | string[];
+    methods: string[];
+    headers: string[];
+    credentials: boolean;
   };
 }
 

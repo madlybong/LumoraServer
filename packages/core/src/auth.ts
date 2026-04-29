@@ -36,6 +36,10 @@ async function verifyJwt(token: string, config: Extract<LumoraAuthConfig, { mode
     throw new Error("Unexpected JWT audience.");
   }
 
+  if (typeof claims.exp === "number" && claims.exp < Math.floor(Date.now() / 1000)) {
+    throw new Error("JWT token has expired.");
+  }
+
   return {
     subject: String(claims.sub ?? "anonymous"),
     strategy: "jwt",

@@ -21,6 +21,7 @@ export function buildOpenApiDocument(
     paths[`${basePath}/{id}`] = {
       get: { summary: `Get ${resource.resource} by id`, tags: [resource.meta?.group ?? resource.resource] },
       put: { summary: `Update ${resource.resource}`, tags: [resource.meta?.group ?? resource.resource] },
+      patch: { summary: `Partial update ${resource.resource}`, tags: [resource.meta?.group ?? resource.resource] },
       delete: { summary: `Delete ${resource.resource}`, tags: [resource.meta?.group ?? resource.resource] }
     };
     paths[`${basePath}/${config.realtime.sseSuffix}`] = {

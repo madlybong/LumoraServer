@@ -48,6 +48,12 @@ export function resolveLumoraConfig(config: LumoraConfig, rootDir: string): Reso
       level: config.logging?.level ?? (
         config.mode === "development" ? "verbose" : config.mode === "production" ? "minimal" : "silent"
       )
+    },
+    cors: {
+      origin: config.cors?.origin ?? (config.mode === "development" ? "*" : ""),
+      methods: config.cors?.methods ?? ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      headers: config.cors?.headers ?? ["Content-Type", "Authorization"],
+      credentials: config.cors?.credentials ?? false
     }
   };
 }

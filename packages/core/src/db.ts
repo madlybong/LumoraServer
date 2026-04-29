@@ -13,6 +13,7 @@ import type {
 
 interface ListOptions {
   filters: URLSearchParams;
+  search?: string;
   sort?: string;
   page: number;
   pageSize: number;
@@ -62,6 +63,7 @@ function normalizeRecord(record: Record<string, unknown>, resource: DefineResour
   };
 
   for (const [fieldName, field] of Object.entries(resource.fields)) {
+    if (field.hidden) continue;
     const raw = record[fieldName];
     if (field.type === "boolean") {
       normalized[fieldName] = raw === true || raw === 1 || raw === "1";
@@ -81,15 +83,26 @@ function normalizeRecord(record: Record<string, unknown>, resource: DefineResour
   return normalized;
 }
 
-function buildWhereClause(resource: DefineResourceResult, filters: URLSearchParams): string[] {
+function buildWhereClause(resource: DefineResourceResult, filters: URLSearchParams, searchTerm?: string): string[] {
+  const reservedParams = new Set(["page", "pageSize", "limit", "sort", "search"]);
   const filterable = new Set(resource.query?.filterable ?? Object.keys(resource.fields).filter((key) => resource.fields[key].filterable));
   const clauses: string[] = [];
 
   for (const [key, value] of filters.entries()) {
-    if (!filterable.has(key)) {
+    if (reservedParams.has(key) || !filterable.has(key)) {
       continue;
     }
     clauses.push(`${quoteIdentifier(key)} = ${escapeValue(value, resource.fields[key])}`);
+  }
+
+  if (searchTerm) {
+    const searchable = Object.keys(resource.fields).filter((k) => resource.fields[k].searchable);
+    if (searchable.length > 0) {
+      const like = searchable
+        .map((k) => `${quoteIdentifier(k)} LIKE ${escapeValue(`%${searchTerm}%`)}`)
+        .join(" OR ");
+      clauses.push(`(${like})`);
+    }
   }
 
   return clauses;
@@ -138,7 +151,8 @@ export class LumoraDatabase {
   }
 
   async ensureResource(resource: DefineResourceResult): Promise<void> {
-    const table = quoteIdentifier(resource.table ?? resource.resource);
+    const tableName = resource.table ?? resource.resource;
+    const table = quoteIdentifier(tableName);
     const fieldLines = Object.entries(resource.fields).map(([name, field]) => {
       const suffix = field.required ? " NOT NULL" : "";
       return `${quoteIdentifier(name)} ${sqlTextType(this.config.client, field)}${suffix}`;
@@ -152,18 +166,35 @@ export class LumoraDatabase {
       ")"
     ].join(" ");
     await this.sql.unsafe(ddl);
+
+    for (const [name, field] of Object.entries(resource.fields)) {
+      if (field.unique) {
+        await this.sql.unsafe(
+          `CREATE UNIQUE INDEX IF NOT EXISTS ${quoteIdentifier(`idx_${tableName}_${name}_unique`)} ON ${table} (${quoteIdentifier(name)})`
+        );
+      } else if (field.indexed) {
+        await this.sql.unsafe(
+          `CREATE INDEX IF NOT EXISTS ${quoteIdentifier(`idx_${tableName}_${name}`)} ON ${table} (${quoteIdentifier(name)})`
+        );
+      }
+    }
   }
 
-  async list(resource: DefineResourceResult, options: ListOptions): Promise<{ items: Record<string, unknown>[]; page: number; pageSize: number }> {
+  async list(resource: DefineResourceResult, options: ListOptions): Promise<{ items: Record<string, unknown>[]; total: number; page: number; pageSize: number }> {
     const table = quoteIdentifier(resource.table ?? resource.resource);
-    const where = buildWhereClause(resource, options.filters);
+    const where = buildWhereClause(resource, options.filters, options.search);
     const clause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
     const sort = buildSortClause(resource, options.sort);
     const offset = (options.page - 1) * options.pageSize;
-    const query = `SELECT * FROM ${table} ${clause} ${sort} LIMIT ${options.pageSize} OFFSET ${offset}`;
-    const rows = await this.sql.unsafe<Record<string, unknown>[]>(query);
+    const dataQuery = `SELECT * FROM ${table} ${clause} ${sort} LIMIT ${options.pageSize} OFFSET ${offset}`;
+    const countQuery = `SELECT COUNT(*) as total FROM ${table} ${clause}`;
+    const [rows, countRows] = await Promise.all([
+      this.sql.unsafe<Record<string, unknown>[]>(dataQuery),
+      this.sql.unsafe<Record<string, unknown>[]>(countQuery)
+    ]);
     return {
       items: rows.map((row) => normalizeRecord(row, resource)),
+      total: Number((countRows[0] as any)?.total ?? 0),
       page: options.page,
       pageSize: options.pageSize
     };

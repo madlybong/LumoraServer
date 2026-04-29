@@ -46,8 +46,9 @@ describe("initLumora", () => {
     expect(created.data.name).toBe("Acme");
 
     const listResponse = await lumora.app.request("/api/v1/company");
-    const listed = await listResponse.json() as { data: { items: unknown[] } };
-    expect(listed.data.items.length).toBe(1);
+    const listed = await listResponse.json() as { data: unknown[]; total: number };
+    expect(listed.data.length).toBe(1);
+    expect(listed.total).toBe(1);
 
     const docsResponse = await lumora.app.request("/__lumora/openapi.json");
     const docs = await docsResponse.json() as { paths: Record<string, unknown> };

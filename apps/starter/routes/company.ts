@@ -15,14 +15,18 @@ export default defineResource({
     name: {
       type: "string",
       required: true,
+      unique: true,
       filterable: true,
       sortable: true,
+      searchable: true,
       description: "Company name"
     },
     domain: {
       type: "string",
       filterable: true,
       sortable: true,
+      searchable: true,
+      indexed: true,
       description: "Primary web domain"
     },
     active: {
@@ -35,6 +39,16 @@ export default defineResource({
     profile: {
       type: "json",
       description: "Additional JSON profile metadata"
+    },
+    internal_code: {
+      type: "string",
+      hidden: true,
+      description: "Internal reference code — never exposed via API"
+    },
+    created_by: {
+      type: "string",
+      readOnly: true,
+      description: "ID of the user who created this record — immutable after creation"
     }
   },
   auth: {
@@ -44,6 +58,7 @@ export default defineResource({
     defaultPageSize: 20,
     maxPageSize: 100,
     filterable: ["name", "domain", "active"],
-    sortable: ["name", "domain", "active"]
+    sortable: ["name", "domain", "active"],
+    searchable: ["name", "domain"]
   }
 });

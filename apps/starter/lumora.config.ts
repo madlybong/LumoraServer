@@ -24,5 +24,8 @@ export default defineLumoraConfig({
   admin: {
     enabled: false,
     path: "/admin"
+  },
+  cors: {
+    origin: "*"
   }
 });

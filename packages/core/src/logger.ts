@@ -22,6 +22,7 @@ function methodColor(method: string): string {
     case "GET": return colors.cyan;
     case "POST": return colors.green;
     case "PUT": return colors.yellow;
+    case "PATCH": return colors.yellow;
     case "DELETE": return colors.red;
     default: return colors.gray;
   }
@@ -76,7 +77,7 @@ export class LumoraLogger {
     
     for (const res of resources) {
       const pathStr = `/${config.api.base.replace(/^\//, "")}/${config.api.version.replace(/^\//, "")}/${res.resource.replace(/^\//, "")}`.replace(/\/+/g, "/");
-      const methods = `${colors.cyan}GET${colors.reset}  ${colors.green}POST${colors.reset}  ${colors.yellow}PUT${colors.reset}  ${colors.red}DELETE${colors.reset}`;
+      const methods = `${colors.cyan}GET${colors.reset}  ${colors.green}POST${colors.reset}  ${colors.yellow}PUT${colors.reset}  ${colors.yellow}PATCH${colors.reset}  ${colors.red}DELETE${colors.reset}`;
       this.write(`│    ${pad(pathStr, 16)}  ${methods}${pad("", width - 24 - Math.max(16, pathStr.length))}│`);
     }
     

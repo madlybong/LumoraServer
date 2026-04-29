@@ -48,6 +48,7 @@ function validatePayload(
   const output: Record<string, unknown> = {};
 
   for (const [name, field] of Object.entries(resource.fields)) {
+    if (field.readOnly) continue;
     const value = input[name] ?? field.default;
     if (mode === "create" && field.required && (value === undefined || value === null || value === "")) {
       throw new Error(`Field "${name}" is required.`);
@@ -136,15 +137,28 @@ async function checkPermission(
   id?: string
 ): Promise<Response | undefined> {
   const guard = resource.permissions?.[method];
-  if (!guard) return undefined;
-  try {
-    await guard({ method, auth, id });
-  } catch (err) {
-    return new Response(
-      JSON.stringify({ ok: false, error: String(err) }),
-      { status: 403, headers: { "Content-Type": "application/json" } }
-    );
+  if (guard) {
+    try {
+      await guard({ method, auth, id });
+    } catch (err) {
+      return new Response(
+        JSON.stringify({ ok: false, error: String(err) }),
+        { status: 403, headers: { "Content-Type": "application/json" } }
+      );
+    }
   }
+
+  const allowedRoles = resource.permissions?.roles?.[method];
+  if (allowedRoles) {
+    const userRoles = (auth?.claims?.roles as string[]) ?? [];
+    if (!userRoles.includes("super-admin") && !allowedRoles.some((r) => userRoles.includes(r))) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "Forbidden" }),
+        { status: 403, headers: { "Content-Type": "application/json" } }
+      );
+    }
+  }
+
   return undefined;
 }
 
@@ -182,6 +196,21 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
   const { upgradeWebSocket, websocket } = createBunWebSocket();
   const app = new Hono<{ Variables: AppVariables }>();
   const logger = new LumoraLogger(config.logging.level);
+
+  app.use("*", async (c, next) => {
+    const { origin, methods, headers, credentials } = config.cors;
+    const requestOrigin = c.req.header("origin") ?? "";
+    const allowed = origin === "*"
+      || (Array.isArray(origin) ? origin.includes(requestOrigin) : requestOrigin === origin);
+    if (allowed && origin) {
+      c.header("Access-Control-Allow-Origin", Array.isArray(origin) ? requestOrigin : origin as string);
+    }
+    c.header("Access-Control-Allow-Methods", methods.join(", "));
+    c.header("Access-Control-Allow-Headers", headers.join(", "));
+    if (credentials) c.header("Access-Control-Allow-Credentials", "true");
+    if (c.req.method === "OPTIONS") return c.body(null, 204);
+    await next();
+  });
 
   app.use("*", async (c, next) => {
     const requestId = crypto.randomUUID();
@@ -223,17 +252,19 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       });
       if (denied) return denied;
       const page = Number(c.req.query("page") ?? 1);
+      const rawPageSize = c.req.query("pageSize") ?? c.req.query("limit");
       const pageSize = Math.min(
-        Number(c.req.query("pageSize") ?? resource.query?.defaultPageSize ?? 20),
+        Number(rawPageSize ?? resource.query?.defaultPageSize ?? 20),
         resource.query?.maxPageSize ?? 100
       );
       const result = await database.list(resource, {
         filters: new URL(c.req.url).searchParams,
+        search: c.req.query("search"),
         sort: c.req.query("sort"),
         page,
         pageSize
       });
-      return c.json({ ok: true, data: result, auth });
+      return c.json({ ok: true, data: result.items, total: result.total, page: result.page, pageSize: result.pageSize });
     });
 
     app.post(resourceBase, async (c) => {
@@ -251,7 +282,7 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       if (denied) return denied;
       const requestId = c.get("requestId");
       const payload = validatePayload(resource, parseBody(await c.req.json().catch(() => ({}))), "create");
-      const input = resource.hooks?.beforeCreate ? await resource.hooks.beforeCreate({ input: payload, auth, resource }) : payload;
+      const input = resource.hooks?.beforeCreate ? await resource.hooks.beforeCreate({ input: payload, auth, resource, database }) : payload;
       const audit = buildAudit("POST", new URL(c.req.url).pathname, requestId);
       const beforePayload: ResourceEventPayload = { resource: resource.resource, action: "created", record: input, audit };
       events.emit("resource:create:before", beforePayload);
@@ -280,9 +311,42 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       const requestId = c.get("requestId");
       const payload = validatePayload(resource, parseBody(await c.req.json().catch(() => ({}))), "update");
       const input = resource.hooks?.beforeUpdate
-        ? await resource.hooks.beforeUpdate({ id: c.req.param("id"), input: payload, auth, resource })
+        ? await resource.hooks.beforeUpdate({ id: c.req.param("id"), input: payload, auth, resource, database })
         : payload;
       const audit = buildAudit("PUT", new URL(c.req.url).pathname, requestId);
+      const existingSnapshot = await database.get(resource, c.req.param("id")) || {};
+      events.emit("resource:update:before", { resource: resource.resource, action: "updated", record: input, audit });
+      const record = await database.update(resource, c.req.param("id"), input, audit);
+      if (!record) {
+        return c.json({ ok: false, error: "Not found" }, 404);
+      }
+      await writeAudit(database, resource, "update", auth, audit, existingSnapshot, record, c.req.param("id"));
+      await resource.hooks?.afterUpdate?.(record);
+      const eventPayload: ResourceEventPayload = { resource: resource.resource, action: "updated", record, audit };
+      events.emit("resource:update:after", eventPayload);
+      realtime.publish(eventPayload);
+      return c.json({ ok: true, data: record });
+    });
+
+    app.patch(`${resourceBase}/:id`, async (c) => {
+      const auth = await authorize(config, resource, c).catch((err) => {
+        logger.error("auth", err, c.get("requestId"));
+        return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
+      });
+      if (auth instanceof Response) {
+        return auth;
+      }
+      const denied = await checkPermission(resource, "PATCH", auth, c.req.param("id")).catch((err) => {
+        logger.error("permit", err, c.get("requestId"));
+        return err instanceof Response ? err : new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 403, headers: { "Content-Type": "application/json" } });
+      });
+      if (denied) return denied;
+      const requestId = c.get("requestId");
+      const payload = validatePayload(resource, parseBody(await c.req.json().catch(() => ({}))), "update");
+      const input = resource.hooks?.beforeUpdate
+        ? await resource.hooks.beforeUpdate({ id: c.req.param("id"), input: payload, auth, resource, database })
+        : payload;
+      const audit = buildAudit("PATCH", new URL(c.req.url).pathname, requestId);
       const existingSnapshot = await database.get(resource, c.req.param("id")) || {};
       events.emit("resource:update:before", { resource: resource.resource, action: "updated", record: input, audit });
       const record = await database.update(resource, c.req.param("id"), input, audit);
@@ -312,7 +376,7 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       if (denied) return denied;
       const requestId = c.get("requestId");
       const audit = buildAudit("DELETE", new URL(c.req.url).pathname, requestId);
-      await resource.hooks?.beforeDelete?.({ id: c.req.param("id"), input: {}, auth, resource });
+      await resource.hooks?.beforeDelete?.({ id: c.req.param("id"), input: {}, auth, resource, database });
       events.emit("resource:delete:before", { resource: resource.resource, action: "deleted", audit });
       const record = await database.delete(resource, c.req.param("id"), audit);
       if (!record) {
