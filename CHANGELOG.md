@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+---
+
+## [0.2.0] — 2026-04-29
+
+### Added
+
+- implement 0.2.0 framework refactor (`40a2bf5`)
+- release 0.1.7 with dev-server logger and exposed database (`30b0dab`)
+
+
 ## [0.1.7] — 2026-04-28
 
 ### Added
