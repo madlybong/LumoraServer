@@ -4,6 +4,19 @@
 
 ---
 
+## [0.2.0] — 2026-04-29
+
+### Added
+
+- implement 0.2.0 framework refactor (`40a2bf5`)
+
+### Maintenance
+
+- v0.2.0 (`2eda367`)
+
+
+---
+
 <<<<<<< HEAD
 ## [0.2.0] — 2026-04-29
 
