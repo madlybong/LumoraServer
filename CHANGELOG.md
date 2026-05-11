@@ -4,6 +4,19 @@
 
 ---
 
+## [0.2.1] — 2026-05-11
+
+### Fixed
+
+- resolve TS strict-mode errors and ship declaration files (`8c36d96`)
+
+### Maintenance
+
+- update CHANGELOG for v0.1.7 (`e8bccf4`)
+
+
+---
+
 ## [0.2.0] — 2026-04-29
 
 ### Added
@@ -16,21 +29,6 @@
 
 
 ---
-
-<<<<<<< HEAD
-## [0.2.0] — 2026-04-29
-
-### Added
-
-- implement 0.2.0 framework refactor (`40a2bf5`)
-=======
-## [0.1.7] — 2026-04-27
-
-### Added
-
->>>>>>> e8bccf409f20efd524a949ea12f7b90a82ecda31
-- release 0.1.7 with dev-server logger and exposed database (`30b0dab`)
-
 
 ## [0.1.7] — 2026-04-28
 
