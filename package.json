@@ -12,6 +12,7 @@
   "scripts": {
     "build": "bun run ./tools/build.ts",
     "check": "bun run ./tools/check.ts",
+    "typecheck": "bun run --filter '*' typecheck",
     "dev": "bun run ./apps/starter/src/index.ts",
     "test": "bun test",
     "cli": "bun run ./packages/core/bin/init.ts",

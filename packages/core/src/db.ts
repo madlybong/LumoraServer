@@ -85,7 +85,7 @@ function normalizeRecord(record: Record<string, unknown>, resource: DefineResour
 
 function buildWhereClause(resource: DefineResourceResult, filters: URLSearchParams, searchTerm?: string): string[] {
   const reservedParams = new Set(["page", "pageSize", "limit", "sort", "search"]);
-  const filterable = new Set(resource.query?.filterable ?? Object.keys(resource.fields).filter((key) => resource.fields[key].filterable));
+  const filterable = new Set(resource.query?.filterable ?? Object.keys(resource.fields).filter((key) => resource.fields[key]!.filterable));
   const clauses: string[] = [];
 
   for (const [key, value] of filters.entries()) {
@@ -96,7 +96,7 @@ function buildWhereClause(resource: DefineResourceResult, filters: URLSearchPara
   }
 
   if (searchTerm) {
-    const searchable = Object.keys(resource.fields).filter((k) => resource.fields[k].searchable);
+    const searchable = Object.keys(resource.fields).filter((k) => resource.fields[k]!.searchable);
     if (searchable.length > 0) {
       const like = searchable
         .map((k) => `${quoteIdentifier(k)} LIKE ${escapeValue(`%${searchTerm}%`)}`)
@@ -115,7 +115,7 @@ function buildSortClause(resource: DefineResourceResult, sort?: string): string 
 
   const descending = sort.startsWith("-");
   const field = descending ? sort.slice(1) : sort;
-  const sortable = new Set(resource.query?.sortable ?? Object.keys(resource.fields).filter((key) => resource.fields[key].sortable));
+  const sortable = new Set(resource.query?.sortable ?? Object.keys(resource.fields).filter((key) => resource.fields[key]!.sortable));
 
   if (!sortable.has(field)) {
     return "ORDER BY updated_at DESC";

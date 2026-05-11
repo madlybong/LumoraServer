@@ -5,12 +5,16 @@
   "author": "Anuvab Chakraborty (https://github.com/madlybong)",
   "license": "MIT",
   "type": "module",
-  "main": "./src/index.ts",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
   "bin": {
-    "init": "./bin/init.ts"
+    "init": "./dist/bin/init.js"
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
   },
   "keywords": [
     "bun",
@@ -42,17 +46,16 @@
     "registry": "https://registry.npmjs.org/"
   },
   "files": [
-    "src",
-    "bin",
-    "tsconfig.json",
+    "dist",
     "README.md",
     "CHANGELOG.md"
   ],
   "scripts": {
     "prepack": "bun -e \"await Bun.write('README.md', await Bun.file('../../README.md').text()); await Bun.write('CHANGELOG.md', await Bun.file('../../CHANGELOG.md').text())\"",
     "postpack": "bun -e \"import { unlinkSync } from 'fs'; try { unlinkSync('README.md') } catch(e){} try { unlinkSync('CHANGELOG.md') } catch(e){}\"",
-    "build": "bun build ./src/index.ts ./bin/init.ts --outdir ./dist",
-    "check": "tsc -p ./tsconfig.json"
+    "build": "bun -e \"import { rmSync } from 'fs'; try { rmSync('dist', { recursive: true }) } catch(e) {} \" && tsc -p tsconfig.build.json && bun build ./src/index.ts ./bin/init.ts --outdir ./dist --target bun",
+    "check": "tsc -p ./tsconfig.json",
+    "typecheck": "tsc -p ./tsconfig.strict.json"
   },
   "dependencies": {
     "hono": "^4.9.7",
