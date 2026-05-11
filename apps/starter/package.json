@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "bun run ./src/index.ts",
     "build": "bun build ./src/index.ts --outdir ./dist",
-    "check": "tsc -p ./tsconfig.json"
+    "check": "tsc -p ./tsconfig.json",
+    "typecheck": "tsc -p ./tsconfig.json"
   },
   "dependencies": {
     "@astrake/lumora-server": "workspace:*"
