@@ -4,6 +4,19 @@
 
 ---
 
+## [0.2.1] — 2026-05-11
+
+### Fixed
+
+- resolve TS strict-mode errors and ship declaration files (`8c36d96`)
+
+### Maintenance
+
+- update CHANGELOG for v0.1.7 (`e8bccf4`)
+
+
+---
+
 <<<<<<< HEAD
 ## [0.2.0] — 2026-04-29
 
