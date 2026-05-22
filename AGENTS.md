@@ -2,86 +2,61 @@
 
 This is the short operating guide for AI coding agents working in this repository.
 
-## Mission
+## Mission & Architecture
 
 `@astrake/lumora-server` is a slim framework, not a plugin-heavy platform. Keep the repo aligned with this model:
+- One published package: `@astrake/lumora-server`
+- One reference app: `apps/starter`
+- One main workflow: typed config + file-based resources + generated runtime
 
-- one published package: `@astrake/lumora-server`
-- one reference app: `apps/starter`
-- one main workflow: typed config + file-based resources + generated runtime
+Keep the public API small (`defineLumoraConfig`, `defineResource`, `initLumora`). Prefer extending the existing runtime over reintroducing old package sprawl or removed plugin/container/jobs architecture. Keep resource files schema-first.
 
-## First places to read
+## First Places to Read & Change Heuristics
 
-- `README.md`
-- `docs/PROJECT.md`
-- `docs/ARCHITECTURE.md`
-- `packages/core/src/types.ts`
-- `packages/core/src/runtime.ts`
-- `apps/starter/lumora.config.ts`
-- `apps/starter/routes/company.ts`
+- `packages/core` (published framework package: typed config, runtime, auth, DB CRUD engine, realtime, docs)
+- `apps/starter` (reference Bun app showing config, routes, resources)
+- Docs: `README.md`, `docs/PROJECT.md`, `docs/ARCHITECTURE.md`
 
-## Repo map
-
-- `packages/core`
-  Published framework package. Owns typed config, init wizard, runtime, auth, DB CRUD engine, realtime, docs, and event emitter.
-- `apps/starter`
-  Reference Bun app showing how a parent application consumes Lumora Server.
-- `tools`
-  Repo-level typecheck, build, version sync, and changelog scripts.
-- `.github/workflows`
-  `ci.yml`, `release.yml`, `version-check.yml`, `codeql.yml`
-
-## Working rules
-
-- Keep the public API small: `defineLumoraConfig`, `defineResource`, `initLumora`.
-- Prefer extending the existing runtime over reintroducing old package sprawl.
-- Do not rebuild the removed plugin/container/jobs architecture.
-- Keep resource files schema-first.
-- Keep auth behavior simple:
-  - dev can disable auth
-  - production must require auth
-- Keep generated REST, SSE, WebSocket, docs, and event emission aligned as one runtime story.
-- Use conventional commits — `feat:`, `fix:`, `docs:`, `chore:`, `ci:`, etc. — so the changelog tool works correctly.
-
-## Preferred implementation pattern
-
-1. Update shared types in `packages/core/src/types.ts` if the public contract changes.
-2. Update runtime behavior in `packages/core/src/runtime.ts` and nearby modules.
+**Change Pattern:**
+1. If a change impacts the public framework surface, update shared types in `packages/core/src/types.ts` first.
+2. Update runtime/routing in `packages/core/src/runtime.ts` or adjacent modules.
 3. Demonstrate usage in `apps/starter`.
-4. Add or update tests.
-5. Update docs in the same change.
+4. Add or update tests, then update docs.
 
-## Release workflow
+## Safe Extension Heuristics
 
-To release a new version:
+- **Resource Capabilities:** Extend resource types -> update generated runtime -> add starter example -> add tests -> update docs.
+- **Auth/Docs Behavior:** Extend config types & validation -> update runtime -> verify starter -> update docs & tests. Dev can disable auth; production MUST require it.
+- **DB Adapter/Engine:** Keep the adapter seam in `db.ts`. Prefer concrete SQLite/MySQL support over abstract ORMs. Keep transaction event emission semantics.
 
+## Known Limitations (Do Not Over-Engineer)
+
+- Basic Docs UI is intentionally simple.
+- CRUD engine is schema-first, not a full ORM.
+- SQLite/MySQL DB support is narrow.
+- Lightweight init wizard and no admin UI yet.
+
+## Release & Validation
+
+Validate with:
+```bash
+bun run check
+bun test
+bun run build
+bun run version:check
+```
+
+Release steps:
 1. Update `VERSION` file.
 2. Run `bun run release:prep` (syncs versions + generates changelog).
-3. Commit: `git commit -am "chore(release): bump version to X.Y.Z"`.
-4. Push to `main` — the release workflow fires automatically.
+3. Commit with Conventional Commits: `chore(release): bump version to X.Y.Z` (crucial for changelog tool).
+4. Push to `main` (CI/CD handles NPM and GitHub release). Do NOT manually create npm packages or GitHub releases.
 
-Do **not** manually create npm packages or GitHub releases — automation handles this.
+## Safe-Change Checklist & Mistakes to Avoid
 
-## Badge system
+- Does the change preserve the slim runtime model and keep the parent app integration simple?
+- Did you avoid tracking build artifacts or local DB files (`*.db`, `dist/`, `*.tgz`)?
+- Does it avoid package sprawl or speculative abstractions before there is concrete runtime need?
+- Are commits written in Conventional Commit format (`feat:`, `fix:`, etc.)?
+- Do not document behavior that no longer exists.
 
-The README uses live badges from:
-- `https://github.com/madlybong/LumoraServer/actions/workflows/ci.yml/badge.svg`
-- `https://img.shields.io/npm/v/@astrake/lumora-server.svg`
-
-These resolve once the repo is pushed to GitHub and the first CI run completes.
-
-## What "done" looks like
-
-- `bun run check` passes
-- `bun test` passes
-- `bun run build` passes
-- docs match the cleaned repo and current runtime behavior
-- `bun run version:check` produces a clean `git diff`
-
-## Common mistakes to avoid
-
-- Reintroducing removed package sprawl
-- Documenting behavior that no longer exists
-- Tracking build artifacts or local DB files (`*.db`, `dist/`, `*.tgz`)
-- Adding large abstractions before there is a concrete runtime need
-- Writing non-conventional commits that break changelog grouping
