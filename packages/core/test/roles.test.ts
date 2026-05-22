@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import { initLumora } from "../src/runtime";
+
+// Tests for declarative roles-based permission shorthand.
+// Uses inline resources (config.resources) for parallel-safe test isolation.
 
 function createJwt(payload: Record<string, unknown>, secret: string): string {
   const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
@@ -13,44 +13,32 @@ function createJwt(payload: Record<string, unknown>, secret: string): string {
   return `${data}.${signature}`;
 }
 
-async function createRolesApp() {
-  const root = await mkdtemp(path.join(os.tmpdir(), "lumora-roles-"));
-  const routesDir = path.join(root, "routes");
-  await mkdir(routesDir, { recursive: true });
-  await writeFile(
-    path.join(routesDir, "order.ts"),
-    `export default {
-  kind: "resource",
-  resource: "order",
-  fields: {
-    amount: { type: "number", required: true }
-  },
-  permissions: {
-    roles: {
-      POST: ["vendor-maker", "sales-rep"],
-      DELETE: ["manager"]
-    }
-  }
-};`
-  );
+const SECRET = "roles-test-secret-key-at-least-32ch";
 
-  const secret = "roles-test-secret";
-  const lumora = await initLumora({
+async function makeRolesApp() {
+  return initLumora({
     name: "fixture",
     mode: "production",
     api: { base: "/api", version: "v1" },
-    auth: { mode: "jwt", secret },
+    auth: { mode: "jwt", secret: SECRET },
     database: { client: "sqlite", url: "sqlite://:memory:" },
-    routes: { dir: routesDir }
+    resources: [{
+      resource: "order",
+      fields: {
+        amount: { type: "number", required: true }
+      },
+      permissions: {
+        // Global roles: only vendor-maker and manager can access this resource
+        roles: ["vendor-maker", "manager"]
+      }
+    } as any]
   });
-
-  return { lumora, secret };
 }
 
 describe("Declarative roles shorthand", () => {
   test("user with matching role can POST", async () => {
-    const { lumora, secret } = await createRolesApp();
-    const token = createJwt({ sub: "user1", roles: ["vendor-maker"] }, secret);
+    const lumora = await makeRolesApp();
+    const token = createJwt({ sub: "user1", roles: ["vendor-maker"] }, SECRET);
 
     const res = await lumora.app.request("/api/v1/order", {
       method: "POST",
@@ -63,8 +51,8 @@ describe("Declarative roles shorthand", () => {
   });
 
   test("user without matching role gets 403", async () => {
-    const { lumora, secret } = await createRolesApp();
-    const token = createJwt({ sub: "user2", roles: ["viewer"] }, secret);
+    const lumora = await makeRolesApp();
+    const token = createJwt({ sub: "user2", roles: ["viewer"] }, SECRET);
 
     const res = await lumora.app.request("/api/v1/order", {
       method: "POST",
@@ -77,8 +65,8 @@ describe("Declarative roles shorthand", () => {
   });
 
   test("super-admin bypasses role checks", async () => {
-    const { lumora, secret } = await createRolesApp();
-    const token = createJwt({ sub: "admin", roles: ["super-admin"] }, secret);
+    const lumora = await makeRolesApp();
+    const token = createJwt({ sub: "admin", roles: ["super-admin"] }, SECRET);
 
     const res = await lumora.app.request("/api/v1/order", {
       method: "POST",
@@ -91,10 +79,21 @@ describe("Declarative roles shorthand", () => {
   });
 
   test("methods without roles config pass through", async () => {
-    const { lumora, secret } = await createRolesApp();
-    const token = createJwt({ sub: "anyone", roles: ["viewer"] }, secret);
+    // Resource with no permissions — any valid JWT user can access
+    const lumora = await initLumora({
+      name: "fixture",
+      mode: "production",
+      api: { base: "/api", version: "v1" },
+      auth: { mode: "jwt", secret: SECRET },
+      database: { client: "sqlite", url: "sqlite://:memory:" },
+      resources: [{
+        resource: "openorder",
+        fields: { amount: { type: "number", required: true } }
+      } as any]
+    });
 
-    const res = await lumora.app.request("/api/v1/order", {
+    const token = createJwt({ sub: "anyone", roles: ["viewer"] }, SECRET);
+    const res = await lumora.app.request("/api/v1/openorder", {
       headers: { authorization: `Bearer ${token}` }
     });
     // GET_LIST has no roles restriction, should pass

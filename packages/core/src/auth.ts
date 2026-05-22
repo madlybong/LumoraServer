@@ -44,7 +44,12 @@ async function verifyJwt(token: string, config: Extract<LumoraAuthConfig, { mode
     subject: String(claims.sub ?? "anonymous"),
     strategy: "jwt",
     token,
-    claims
+    claims,
+    roles: Array.isArray(claims.roles) ? claims.roles.map(String) : undefined,
+    // LS-9: extract scope from JWT claims for store-scoped permission enforcement
+    scope: (claims.scope && typeof claims.scope === "object" && !Array.isArray(claims.scope))
+      ? claims.scope as Record<string, unknown>
+      : undefined
   };
 }
 
