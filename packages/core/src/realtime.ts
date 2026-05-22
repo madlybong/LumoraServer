@@ -31,6 +31,26 @@ export class LumoraRealtimeHub implements LumoraRealtime {
     }
   }
 
+  // LS-7: broadcast a custom event to all clients on a specific topic (non-CRUD)
+  broadcast(topic: string, data: unknown): void {
+    const encoded = `event: message\ndata: ${JSON.stringify({ topic, data })}\n\n`;
+    const message = JSON.stringify({ type: "message", topic, data });
+    // Send to topic-specific SSE clients
+    for (const client of this.sseClients.get(topic) ?? new Set()) {
+      client.controller.enqueue(encoded);
+    }
+    for (const socket of this.sockets.get(topic) ?? new Set()) {
+      socket.send(message);
+    }
+    // Also send to wildcard listeners (*)
+    for (const client of this.sseClients.get("*") ?? new Set()) {
+      client.controller.enqueue(encoded);
+    }
+    for (const socket of this.sockets.get("*") ?? new Set()) {
+      socket.send(message);
+    }
+  }
+
   subscribe(resource: string, listener: (payload: ResourceEventPayload) => void): () => void {
     const set = this.listeners.get(resource) ?? new Set<(payload: ResourceEventPayload) => void>();
     set.add(listener);
