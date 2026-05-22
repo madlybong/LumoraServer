@@ -1,0 +1,4 @@
+[test]
+# Use sequential test execution to prevent ESM module cache cross-contamination
+# when tests run in parallel and write dynamic route fixture files to temp directories.
+timeout = 30000
