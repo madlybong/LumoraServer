@@ -8,4 +8,8 @@ export * from "./types";
 export * from "./email";
 export * from "./ai";
 export * from "./logger";
+export * from "./upload";
+export * from "./export";
+export * from "./scheduler";
+export * from "./query";
 export { LumoraDatabase } from "./db";
