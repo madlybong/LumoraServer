@@ -2,12 +2,15 @@
 
 ## Supported Versions
 
-Only the latest release of `@astrake/lumora-server` receives security fixes.
+Only the latest release series of `@astrake/lumora-server` receives security fixes.
 
 | Version | Supported |
 |---------|-----------|
-| Latest  | ✅        |
-| Older   | ❌        |
+| v0.2.x  | ✅ (Latest) |
+| < v0.2.0 | ❌ (Legacy) |
+
+> [!NOTE]
+> Major security patches and protocol hardening (such as mandatory server-side JWT expiration `exp` validation, safe `hidden` field data stripping, and explicit RBAC authorization) are built natively into version `v0.2.x` and later. Older legacy versions (e.g. `0.1.7`) are deprecated and no longer supported.
 
 ## Reporting a Vulnerability
 
