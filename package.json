@@ -1,6 +1,6 @@
 {
   "name": "lumora-server-workspace",
-  "version": "0.2.1",
+  "version": "0.5.0",
   "private": true,
   "description": "Monorepo workspace for @astrake/lumora-server — Bun + Hono typed API framework.",
   "author": "Anuvab Chakraborty (https://github.com/madlybong)",
@@ -14,7 +14,7 @@
     "check": "bun run ./tools/check.ts",
     "typecheck": "bun run --filter '*' typecheck",
     "dev": "bun run ./apps/starter/src/index.ts",
-    "test": "bun test",
+    "test": "bun test --jobs=1",
     "cli": "bun run ./packages/core/bin/init.ts",
     "version:sync": "bun run ./tools/version.ts",
     "version:check": "bun run ./tools/version.ts && git diff --exit-code",
