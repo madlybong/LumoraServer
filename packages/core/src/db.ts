@@ -8,7 +8,8 @@ import type {
   ResourceField,
   TransactionEventPayload,
   TypedEventEmitter,
-  AuditLogRecord
+  AuditLogRecord,
+  BulkResult
 } from "./types";
 
 interface ListOptions {
@@ -17,6 +18,8 @@ interface ListOptions {
   sort?: string;
   page: number;
   pageSize: number;
+  // LS-9: scope injection — adds a non-bypassable WHERE clause for store-scoped resources
+  scope?: { field: string; value: unknown };
 }
 
 function quoteIdentifier(identifier: string): string {
@@ -33,6 +36,9 @@ function sqlTextType(client: LumoraDatabaseConfig["client"], field: ResourceFiel
       return client === "mysql" ? "JSON" : "TEXT";
     case "datetime":
       return client === "mysql" ? "DATETIME" : "TEXT";
+    case "file":
+    case "file[]":
+      return "TEXT"; // stored as URL string
     case "string":
     default:
       return "TEXT";
@@ -75,6 +81,9 @@ function normalizeRecord(record: Record<string, unknown>, resource: DefineResour
       } catch {
         normalized[fieldName] = raw;
       }
+    } else if (field.type === "file" || field.type === "file[]") {
+      // Pass through as-is — stored as URL string(s)
+      normalized[fieldName] = raw;
     } else {
       normalized[fieldName] = raw;
     }
@@ -183,6 +192,10 @@ export class LumoraDatabase {
   async list(resource: DefineResourceResult, options: ListOptions): Promise<{ items: Record<string, unknown>[]; total: number; page: number; pageSize: number }> {
     const table = quoteIdentifier(resource.table ?? resource.resource);
     const where = buildWhereClause(resource, options.filters, options.search);
+    // LS-9: inject scope as a non-bypassable WHERE condition (cannot be overridden by user filters)
+    if (options.scope) {
+      where.push(`${quoteIdentifier(options.scope.field)} = ${escapeValue(options.scope.value)}`);
+    }
     const clause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
     const sort = buildSortClause(resource, options.sort);
     const offset = (options.page - 1) * options.pageSize;
@@ -199,6 +212,7 @@ export class LumoraDatabase {
       pageSize: options.pageSize
     };
   }
+
 
   async get(resource: DefineResourceResult, id: string): Promise<Record<string, unknown> | null> {
     const table = quoteIdentifier(resource.table ?? resource.resource);
@@ -328,5 +342,91 @@ export class LumoraDatabase {
     await this.sql.unsafe(
       `INSERT INTO \`_audit_logs\` (${columns}) VALUES (${values})`
     );
+  }
+
+  // LS-2: Internal helpers for relation resolution (bypass filterable restriction)
+  async getByField(
+    resource: DefineResourceResult,
+    field: string,
+    value: unknown
+  ): Promise<Record<string, unknown> | null> {
+    const table = quoteIdentifier(resource.table ?? resource.resource);
+    const query = `SELECT * FROM ${table} WHERE ${quoteIdentifier(field)} = ${escapeValue(value)} LIMIT 1`;
+    const rows = await this.sql.unsafe<Record<string, unknown>[]>(query);
+    return rows[0] ? normalizeRecord(rows[0], resource) : null;
+  }
+
+  async listByField(
+    resource: DefineResourceResult,
+    field: string,
+    value: unknown,
+    limit = 1000
+  ): Promise<Record<string, unknown>[]> {
+    const table = quoteIdentifier(resource.table ?? resource.resource);
+    const query = `SELECT * FROM ${table} WHERE ${quoteIdentifier(field)} = ${escapeValue(value)} ORDER BY updated_at DESC LIMIT ${limit}`;
+    const rows = await this.sql.unsafe<Record<string, unknown>[]>(query);
+    return rows.map((row) => normalizeRecord(row, resource));
+  }
+
+  // LS-4: Bulk create with optional transaction wrapping
+  async createBulk(
+    resource: DefineResourceResult,
+    inputs: Record<string, unknown>[],
+    audit?: RequestAudit
+  ): Promise<BulkResult[]> {
+    if (inputs.length === 0) return [];
+
+    const table = quoteIdentifier(resource.table ?? resource.resource);
+    const now = new Date().toISOString();
+    const transactional = resource.bulk?.transactional !== false; // default true
+
+    // Prepare all records and their INSERT queries
+    const prepared: { record: Record<string, unknown>; query: string }[] = inputs.map((input) => {
+      const id = crypto.randomUUID();
+      const record = { id, ...input, created_at: now, updated_at: now };
+      const columns = Object.keys(record).map(quoteIdentifier).join(", ");
+      const values = Object.entries(record)
+        .map(([key, value]) => escapeValue(value, key in resource.fields ? resource.fields[key] : undefined))
+        .join(", ");
+      return { record, query: `INSERT INTO ${table} (${columns}) VALUES (${values})` };
+    });
+
+    if (transactional) {
+      const tx = buildTransactionPayload(resource, "create", `BULK INSERT ${prepared.length} records into ${table}`);
+      this.events.emit("db:transaction:before", tx);
+      try {
+        await this.sql.begin(async (sql) => {
+          for (const { query } of prepared) {
+            await sql.unsafe(query);
+          }
+        });
+        this.events.emit("db:transaction:after", tx);
+        return prepared.map(({ record }) => ({
+          success: true,
+          id: record.id as string,
+          data: normalizeRecord(record, resource)
+        }));
+      } catch (error) {
+        this.events.emit("db:transaction:rollback", { ...tx, error: String(error) });
+        // Entire batch failed — return error for all
+        return inputs.map(() => ({ success: false, error: String(error) }));
+      }
+    } else {
+      // Non-transactional: attempt each independently
+      const results: BulkResult[] = [];
+      for (const { record, query } of prepared) {
+        const tx = buildTransactionPayload(resource, "create", query);
+        this.events.emit("db:transaction:before", tx);
+        try {
+          await this.sql.begin(async (sql) => { await sql.unsafe(query); });
+          this.events.emit("db:transaction:after", tx);
+          results.push({ success: true, id: record.id as string, data: normalizeRecord(record, resource) });
+        } catch (error) {
+          this.events.emit("db:transaction:rollback", { ...tx, error: String(error) });
+          results.push({ success: false, error: String(error) });
+        }
+      }
+      return results;
+    }
   }
 }
