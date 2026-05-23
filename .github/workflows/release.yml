@@ -55,11 +55,11 @@ jobs:
       - name: Verify clean tree
         run: git diff --exit-code
 
-      - name: Run tests
-        run: bun run test
-
       - name: Build package
         run: bun run build
+
+      - name: Run tests
+        run: bun run test
 
       - name: Generate changelog
         run: bun run changelog
