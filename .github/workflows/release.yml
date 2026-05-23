@@ -30,7 +30,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.3.12"
+          bun-version: "1.3.14"
 
       - name: Setup Node (npm registry auth)
         uses: actions/setup-node@v4
@@ -56,7 +56,7 @@ jobs:
         run: git diff --exit-code
 
       - name: Run tests
-        run: bun test
+        run: bun run test
 
       - name: Build package
         run: bun run build
