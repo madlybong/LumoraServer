@@ -1,6 +1,6 @@
 const builds: Array<[string, string[]]> = [
-  ["packages/core", ["bun", "build", "./src/index.ts", "./bin/init.ts", "--target", "bun", "--outdir", "./dist"]],
-  ["apps/starter", ["bun", "build", "./src/index.ts", "--target", "bun", "--outdir", "./dist"]]
+  ["packages/core", ["bun", "run", "build"]],
+  ["apps/starter", ["bun", "run", "build"]]
 ];
 
 for (const [cwd, command] of builds) {
