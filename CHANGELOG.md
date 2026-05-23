@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+---
+
+## [0.5.1] — 2026-05-23
+
+### Added
+
+- add mode-aware migration engine (`9a9108b`)
+
 ## [0.5.0] — 2026-05-22
 
 ### Added
