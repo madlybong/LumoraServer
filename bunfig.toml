@@ -1,4 +1,6 @@
 [test]
-# Use sequential test execution to prevent ESM module cache cross-contamination
-# when tests run in parallel and write dynamic route fixture files to temp directories.
+# Sequential execution: prevents ESM module cache cross-contamination
+# when tests run in parallel and share in-process port :3000 or resource names.
+# Applied globally — affects both `bun test` and `bun run test` (npm script).
+jobs = 1
 timeout = 30000
