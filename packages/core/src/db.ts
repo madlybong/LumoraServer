@@ -12,6 +12,13 @@ import type {
   BulkResult
 } from "./types";
 
+export interface MigrationRecord {
+  id: number;
+  name: string;       // filename stem, e.g. "20260524_001_create_company"
+  checksum: string;   // SHA-256 hex of file content
+  applied_at: string; // ISO timestamp
+}
+
 interface ListOptions {
   filters: URLSearchParams;
   search?: string;
@@ -428,5 +435,49 @@ export class LumoraDatabase {
       }
       return results;
     }
+  }
+
+  // ─── Migration Seam ──────────────────────────────────────────────────────
+
+  /**
+   * Create the _migrations ledger table if it does not exist.
+   * Called once by LumoraMigrationEngine before any ledger reads.
+   */
+  async ensureMigrationsTable(): Promise<void> {
+    const isMySQL = this.config.client === "mysql";
+    const ddl = isMySQL
+      ? `CREATE TABLE IF NOT EXISTS \`_migrations\` (
+          \`id\`         BIGINT AUTO_INCREMENT PRIMARY KEY,
+          \`name\`       VARCHAR(512) NOT NULL UNIQUE,
+          \`checksum\`   VARCHAR(64)  NOT NULL,
+          \`applied_at\` TEXT         NOT NULL
+        )`
+      : `CREATE TABLE IF NOT EXISTS \`_migrations\` (
+          \`id\`         INTEGER PRIMARY KEY AUTOINCREMENT,
+          \`name\`       TEXT NOT NULL UNIQUE,
+          \`checksum\`   TEXT NOT NULL,
+          \`applied_at\` TEXT NOT NULL
+        )`;
+    await this.sql.unsafe(ddl);
+  }
+
+  /**
+   * Return all applied migrations ordered by id (insertion order).
+   */
+  async getAppliedMigrations(): Promise<MigrationRecord[]> {
+    const rows = await this.sql.unsafe<MigrationRecord[]>(
+      `SELECT id, name, checksum, applied_at FROM \`_migrations\` ORDER BY id ASC`
+    );
+    return rows.map((r) => ({ ...r, id: Number(r.id) }));
+  }
+
+  /**
+   * Record a successfully applied migration in the ledger.
+   */
+  async recordMigration(name: string, checksum: string): Promise<void> {
+    const applied_at = new Date().toISOString();
+    await this.sql.unsafe(
+      `INSERT INTO \`_migrations\` (\`name\`, \`checksum\`, \`applied_at\`) VALUES (${escapeValue(name)}, ${escapeValue(checksum)}, ${escapeValue(applied_at)})`
+    );
   }
 }

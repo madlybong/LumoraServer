@@ -46,6 +46,7 @@ export async function scaffoldLumoraProject(targetDir: string, answers: InitAnsw
   await mkdir(targetDir, { recursive: true });
   await mkdir(path.join(targetDir, answers.routesDir), { recursive: true });
   await mkdir(path.join(targetDir, "src"), { recursive: true });
+  await mkdir(path.join(targetDir, "migrations"), { recursive: true });
 
   const packageJsonPath = path.join(targetDir, "package.json");
   const currentPackage = existingApp ? JSON.parse(await readFile(packageJsonPath, "utf8")) : { name: answers.projectName, version: "0.1.0", scripts: {} };
@@ -94,6 +95,12 @@ export default defineLumoraConfig({
   routes: {
     dir: ${JSON.stringify(answers.routesDir)}
   },
+  // Migration files: migrations/YYYYMMDD_NNN_description.sql
+  // dev  \u2192 applied automatically on startup
+  // prod \u2192 run \`bun run lumora migrate\` before deploying
+  migrations: {
+    dir: "./migrations"
+  },
   docs: {
     enabled: ${answers.docs ? "true" : "false"}
   }
@@ -133,17 +140,45 @@ const server = Bun.serve({
 console.log(\`Lumora listening on http://localhost:\${server.port}\`);
 `
   );
+  const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  await writeFile(
+    path.join(targetDir, "migrations", `${today}_001_initial_schema.sql`),
+    `-- Migration: ${today}_001_initial_schema
+-- Initial schema for ${answers.projectName}.
+-- Add future structural changes in new numbered files:
+--   ${today}_002_add_column.sql
+
+-- Example: uncomment and adapt the table below to your first resource
+-- CREATE TABLE IF NOT EXISTS \`company\` (
+--   \`id\`         VARCHAR(191) PRIMARY KEY,
+--   \`name\`       TEXT NOT NULL,
+--   \`created_at\` TEXT NOT NULL,
+--   \`updated_at\` TEXT NOT NULL
+-- );
+`
+  );
   await writeFile(
     path.join(targetDir, "LUMORA_SETUP.md"),
     `# Lumora Setup
 
 - Config file: \`lumora.config.ts\`
 - Resource directory: \`${answers.routesDir}\`
+- Migrations directory: \`migrations/\`
 - Dev command: \`bun run dev:lumora\`
 - Generated REST path: ${answers.base}/${answers.version}/company
 - Realtime endpoints:
   - SSE: ${answers.base}/${answers.version}/company/events
   - WebSocket: ${answers.base}/${answers.version}/company/ws
+
+## Migrations
+
+Add SQL files to \`migrations/\` using this naming convention:
+
+  YYYYMMDD_NNN_description.sql
+
+Development: migrations apply automatically on \`bun run dev:lumora\`.
+Production:  run \`bun run lumora migrate\` before starting the server.
+Status:      \`bun run lumora migrate --status\`
 `
   );
 }

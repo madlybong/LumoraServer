@@ -43,6 +43,7 @@ There are no other active framework packages in the repo anymore.
 - typed event emitter for lifecycle, CRUD, DB transaction, and realtime message events
 - static token and JWT auth modes
 - dev-mode OpenAPI JSON and simple docs UI
+- file-based SQL migration engine with automatic dev-apply
 - interactive init wizard
 
 ## What the starter app proves

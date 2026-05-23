@@ -12,4 +12,5 @@ export * from "./upload";
 export * from "./export";
 export * from "./scheduler";
 export * from "./query";
+export * from "./migrations";
 export { LumoraDatabase } from "./db";

@@ -8,7 +8,7 @@
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
   "bin": {
-    "init": "./dist/bin/init.js"
+    "lumora": "./dist/bin/init.js"
   },
   "exports": {
     ".": {

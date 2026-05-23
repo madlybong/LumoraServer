@@ -17,6 +17,7 @@ import { handleFileUpload, hasFileFields, serveUploadedFile } from "./upload";
 import { exportToCsv, getCsvFilename } from "./export";
 import { startScheduler } from "./scheduler";
 import { createQueryExecutor } from "./query";
+import { LumoraMigrationEngine } from "./migrations";
 
 import type {
   DefineResourceResult,
@@ -298,6 +299,10 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
 
   await database.connect();
   await database.ensureAuditTable();
+
+  // Migration engine — mode-aware (auto in dev, strict in prod, off in test)
+  const migrationEngine = new LumoraMigrationEngine(database, config, logger);
+  await migrationEngine.run();
 
   const emailService = config.email
     ? createEmailService(config.email, database.sql)

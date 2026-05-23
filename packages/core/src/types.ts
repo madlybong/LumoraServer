@@ -191,6 +191,20 @@ export interface LumoraScheduledTask {
   enabled?: boolean;
 }
 
+export interface LumoraMigrationsConfig {
+  /**
+   * Directory containing *.sql migration files.
+   * Relative to lumora.config.ts location. Default: "migrations"
+   */
+  dir?: string;
+  /**
+   * "auto"   — apply pending migrations automatically on startup (default in development)
+   * "strict" — fail startup if any pending migration exists (default in production)
+   * "off"    — disable migration engine entirely (default in test)
+   */
+  mode?: "auto" | "strict" | "off";
+}
+
 export interface LumoraConfig {
   name: string;
   mode: LumoraMode;
@@ -239,6 +253,8 @@ export interface LumoraConfig {
   };
   // LS-8: declarative scheduled tasks
   schedule?: LumoraScheduledTask[];
+  // Migration system config
+  migrations?: LumoraMigrationsConfig;
 }
 
 export interface ResolvedLumoraConfig extends LumoraConfig {
@@ -263,6 +279,11 @@ export interface ResolvedLumoraConfig extends LumoraConfig {
     methods: string[];
     headers: string[];
     credentials: boolean;
+  };
+  migrations: {
+    /** Absolute resolved path to migrations directory */
+    dir: string;
+    mode: "auto" | "strict" | "off";
   };
 }
 

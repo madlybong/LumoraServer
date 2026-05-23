@@ -16,6 +16,8 @@
     "dev": "bun run ./apps/starter/src/index.ts",
     "test": "bun test --jobs=1",
     "cli": "bun run ./packages/core/bin/init.ts",
+    "lumora": "bun run ./packages/core/bin/init.ts",
+    "migrate": "bun run ./packages/core/bin/init.ts migrate",
     "version:sync": "bun run ./tools/version.ts",
     "version:check": "bun run ./tools/version.ts && git diff --exit-code",
     "changelog": "bun run ./tools/changelog.ts",

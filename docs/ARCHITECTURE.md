@@ -126,3 +126,63 @@ Docs are generated from resolved config and discovered resource definitions. The
 ## Future boundary
 
 Administrator UI is not implemented yet. Current resource metadata and config fields only reserve the extension points needed for future attachment.
+
+## Migration model
+
+Lumora ships a file-based, mode-aware migration engine. No ORM, no migration DSL — plain SQL files that are version-tracked in a `_migrations` ledger table.
+
+### File naming
+
+```
+YYYYMMDD_NNN_description.sql
+```
+
+Example:
+```
+migrations/
+  20260524_001_initial_schema.sql
+  20260524_002_add_user_email_index.sql
+  20260601_001_add_product_table.sql
+```
+
+Files are applied in lexicographic order. The date prefix guarantees chronological ordering across parallel branches.
+
+### Ledger table
+
+Each applied migration is recorded in `_migrations`:
+
+| column       | type   | description                         |
+|---|---|---|
+| `id`         | int    | auto-increment                      |
+| `name`       | text   | filename stem (without `.sql`)      |
+| `checksum`   | text   | SHA-256 of file content             |
+| `applied_at` | text   | ISO timestamp of apply              |
+
+### Mode-aware behavior
+
+| `config.mode`   | Default `migrations.mode` | Startup behavior                                          |
+|---|---|---|
+| `development`   | `"auto"`                  | Apply pending migrations on startup (schema changed or fresh start) |
+| `production`    | `"strict"`                | Fail startup if any pending migration exists             |
+| `test`          | `"off"`                   | Skip engine entirely — no FS reads, no table creation    |
+
+Override with `migrations.mode` in `lumora.config.ts`.
+
+### CLI commands
+
+```bash
+# Apply all pending (production pre-deploy step)
+bun run lumora migrate
+
+# Show applied / pending list
+bun run lumora migrate --status
+
+# Print SQL without applying (CI safety check)
+bun run lumora migrate --dry-run
+```
+
+### Relationship to ensureResource
+
+`ensureResource()` still runs `CREATE TABLE IF NOT EXISTS` for each declared resource. This handles first-boot table creation and keeps zero-migration projects working without any migration files.
+
+Migrations take over for schema **evolution**: new columns, index changes, data back-fills, and any DDL that `ensureResource` cannot express.

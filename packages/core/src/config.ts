@@ -29,6 +29,12 @@ async function importConfigFile(configPath: string, cwd: string): Promise<Lumora
 export function resolveLumoraConfig(config: LumoraConfig, rootDir: string): ResolvedLumoraConfig {
   validateAuth(config.mode, config.auth);
 
+  const migrationMode = config.migrations?.mode ?? (
+    config.mode === "development" ? "auto"
+    : config.mode === "production" ? "strict"
+    : "off"
+  );
+
   return {
     ...config,
     rootDir,
@@ -54,6 +60,10 @@ export function resolveLumoraConfig(config: LumoraConfig, rootDir: string): Reso
       methods: config.cors?.methods ?? ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       headers: config.cors?.headers ?? ["Content-Type", "Authorization"],
       credentials: config.cors?.credentials ?? false
+    },
+    migrations: {
+      dir: path.resolve(rootDir, config.migrations?.dir ?? "migrations"),
+      mode: migrationMode
     }
   };
 }

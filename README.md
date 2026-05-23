@@ -163,6 +163,7 @@ const data = await lumora.query.execute(
 | LS-9 | Store-scoped permissions | `permissions.scope` in `defineResource()` |
 | LS-10 | AI provider gateway | `instance.ai.chat()`, `getUsage()` |
 | LS-11 | Structured query executor | `instance.query.execute(descriptor, ctx)` |
+| LS-12 | File-based SQL migrations | `bun run lumora migrate` |
 
 ---
 

@@ -18,6 +18,12 @@ export default defineLumoraConfig({
   routes: {
     dir: "./routes"
   },
+  // Migration files: apps/starter/migrations/YYYYMMDD_NNN_description.sql
+  // dev  → applied automatically on startup
+  // prod → run `bun run lumora migrate` before deploying
+  migrations: {
+    dir: "./apps/starter/migrations"
+  },
   docs: {
     enabled: true
   },
