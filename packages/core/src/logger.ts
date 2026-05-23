@@ -69,7 +69,7 @@ export class LumoraLogger {
     const docsStr = config.docs.enabled ? `http://localhost:${config.server.port}${config.docs.path}` : "disabled";
     this.write(`│  ${colors.dim}Docs${colors.reset}     ${docsStr}${pad("", width - 12 - docsStr.length)}│`);
     
-    const pluginsStr = `email ${config.email ? "✓" : "✘"}  ai ${config.ai ? "✓" : "✘"}`;
+    const pluginsStr = `email ${config.email ? "✓" : "—"}  ai ${config.ai ? "✓" : "—"}`;
     this.write(`│  ${colors.dim}Plugins${colors.reset}  ${pluginsStr}${pad("", width - 12 - pluginsStr.length + (config.email ? 0 : 0))}│`);
     
     this.write(`├${line}┤`);
@@ -87,7 +87,7 @@ export class LumoraLogger {
   request(method: string, path: string, status: number, durationMs: number, requestId: string, errorMsg?: string) {
     if (this.level !== "verbose") return;
 
-    const icon = status >= 400 ? `${colors.red}✘${colors.reset}` : `${colors.green}→${colors.reset}`;
+    const icon = status >= 400 ? `${colors.red}✖${colors.reset}` : `${colors.green}→${colors.reset}`;
     const mColor = methodColor(method);
     const sColor = statusColor(status);
     const reqIdStr = requestId.split("-")[0];
@@ -109,7 +109,7 @@ export class LumoraLogger {
   error(context: string, err: unknown, requestId?: string) {
     if (this.level === "silent") return;
     const reqIdStr = requestId ? ` [${requestId.split("-")[0]}]` : "";
-    const prefix = this.level === "minimal" ? `  ${colors.red}✘  ${new Date().toISOString()}${colors.reset}` : `  ${colors.red}✘${colors.reset}  ${colors.dim}${pad(context, 7)}${colors.reset}`;
+    const prefix = this.level === "minimal" ? `  ${colors.red}✖  ${new Date().toISOString()}${colors.reset}` : `  ${colors.red}✖${colors.reset}  ${colors.dim}${pad(context, 7)}${colors.reset}`;
     this.write(`${prefix}  ${colors.red}${err}${colors.reset}${colors.dim}${reqIdStr}${colors.reset}`);
   }
 
