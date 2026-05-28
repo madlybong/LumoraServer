@@ -8,6 +8,15 @@ bun run check
 bun test
 ```
 
+### Local PostgreSQL Setup (Optional)
+By default, `bun test` runs only the SQLite/MySQL tests. To run the full test suite (including the 5 `pg-*.test.ts` integration tests) locally:
+1. Ensure PostgreSQL 16+ is installed locally.
+2. Run the setup script as the postgres superuser:
+   `psql -U postgres -f tools/setup-pg-local.sql`
+3. Copy the `.env` template:
+   `cp .env.example .env`
+4. Now `bun test` will execute all tests against the local database.
+
 ## Main commands
 
 Start the reference app:

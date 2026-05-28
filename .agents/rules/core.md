@@ -11,6 +11,7 @@ This catalog defines the strict coding rules and architecture requirements for d
 | C3 | **No Heavy Abstractions** | Avoid speculative wrappers or ORMs. Databases are supported directly via SQLite (`bun:sql` and `bun:postgres`) and MySQL. Do not add complex dynamic query generator patterns. The three-client branching pattern inside `db.ts` is the correct, approved extension model. |
 | C5 | **DB Dialect Seam** | PostgreSQL is the third supported client alongside SQLite and MySQL. All dialect-specific SQL MUST be contained inside `db.ts`. |
 | C4 | **No Queue Subsystems** | Do NOT add background workers, jobs, cron schedules, or event loop blocking queues. Keep the framework in-process and lightweight. |
+| C6 | **Typecheck After Every Meaningful Change** | Run `bun run check` after every meaningful code change before staging files. A commit that introduces a TypeScript error is never acceptable. Fix `bun run check` before proceeding with any other step. |
 
 ## Core Implementation Block Checklist
 

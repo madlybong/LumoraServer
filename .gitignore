@@ -16,6 +16,7 @@ dist/
 # Environment / secrets
 .env
 .env.*
+!.env.example
 *.pem
 *.key
 
@@ -35,3 +36,6 @@ Thumbs.db
 # Editor
 .vscode/
 .idea/
+
+# Release artifacts
+release_notes.txt
