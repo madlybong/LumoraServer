@@ -27,13 +27,13 @@ Keep the public API small (`defineLumoraConfig`, `defineResource`, `initLumora`)
 
 - **Resource Capabilities:** Extend resource types -> update generated runtime -> add starter example -> add tests -> update docs.
 - **Auth/Docs Behavior:** Extend config types & validation -> update runtime -> verify starter -> update docs & tests. Dev can disable auth; production MUST require it.
-- **DB Adapter/Engine:** Keep the adapter seam in `db.ts`. Prefer concrete SQLite/MySQL support over abstract ORMs. Keep transaction event emission semantics.
+- **DB Adapter/Engine:** Keep the adapter seam in `db.ts`. Prefer concrete SQLite/MySQL/PostgreSQL support over abstract ORMs. Keep transaction event emission semantics.
 
 ## Known Limitations (Do Not Over-Engineer)
 
 - Basic Docs UI is intentionally simple.
 - CRUD engine is schema-first, not a full ORM.
-- SQLite/MySQL DB support is narrow.
+- SQLite, MySQL, and PostgreSQL are supported via `bun:sql`/`bun:postgres`. Further DB adapters are out of scope until there is concrete runtime need.
 - Lightweight init wizard and no admin UI yet.
 
 ## Release & Validation

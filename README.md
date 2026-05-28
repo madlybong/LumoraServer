@@ -64,6 +64,20 @@ bun run dev        # start the reference starter app
 
 ## Usage
 
+### PostgreSQL Quick-Start
+
+```typescript
+import { defineLumoraConfig } from "@astrake/lumora-server";
+
+export default defineLumoraConfig({
+  database: {
+    client: "postgresql",
+    url: "postgres://user:pass@localhost:5432/db"
+  }
+});
+```
+
+
 ```ts
 // lumora.config.ts
 import { defineLumoraConfig } from "@astrake/lumora-server";
@@ -71,7 +85,7 @@ import { defineLumoraConfig } from "@astrake/lumora-server";
 export default defineLumoraConfig({
   base: "/api",
   version: "v1",
-  db: { type: "sqlite", path: "./app.db" },
+  db: { client: "sqlite", url: "./app.db" },
   auth: { type: "jwt", secret: process.env.JWT_SECRET! },
   routes: "./routes",
   ai: {

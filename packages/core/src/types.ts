@@ -170,7 +170,14 @@ export type LumoraAuthConfig =
 
 export type LumoraDatabaseConfig =
   | { client: "sqlite"; url: string }
-  | { client: "mysql"; url: string };
+  | { client: "mysql"; url: string }
+  | {
+      client: "postgresql";
+      url: string;
+      pool?: { min?: number; max?: number; idleTimeout?: number };
+      schema?: string;
+      ssl?: boolean | { ca?: string; cert?: string; key?: string; rejectUnauthorized?: boolean };
+    };
 
 // LS-8: Scheduled tasks (Bun.cron-based, no external deps)
 export interface SchedulerContext {
