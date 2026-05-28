@@ -176,19 +176,12 @@ export class LumoraDatabase {
     if (config.client === "postgresql") {
       const pgSchema = config.schema && config.schema !== "public" ? config.schema : undefined;
       this.sql = new SQL(config.url, {
-        min:         config.pool?.min ?? 2,
         max:         config.pool?.max ?? 10,
         idleTimeout: config.pool?.idleTimeout ?? 30_000,
         ssl:         config.ssl ?? false,
-        // The first argument is the error object (null on success), the second is the connection.
-        onconnect: pgSchema
-          ? async (err: Error | null, connection?: any) => {
-              if (!err) {
-                const target = connection ?? this.sql;
-                await target.unsafe(`SET search_path = "${pgSchema}"`);
-              }
-            }
-          : undefined,
+        // Use PostgreSQL startup parameters to set search_path per connection.
+        // This is the correct mechanism — no extra per-connection query needed.
+        ...(pgSchema ? { connection: { search_path: pgSchema } } : {}),
       });
     } else {
       this.sql = new SQL(config.url, config.client === "mysql" ? { adapter: "mysql" } : { adapter: "sqlite" });
