@@ -11,7 +11,7 @@ describe("PostgreSQL Connection & DDL", () => {
     await db.connect();
     
     const rows = await db.sql.unsafe<{ search_path: string }[]>("SHOW search_path");
-    expect(rows[0]?.search_path).toBe('"lumora_test_schema"');
+    expect(rows[0]?.search_path).toBe('lumora_test_schema');
     
     await db.close();
   });
@@ -52,7 +52,7 @@ describe("PostgreSQL Connection & DDL", () => {
     expect(typeMap["num"]).toBe("NUMERIC");
     expect(typeMap["bool"]).toBe("BOOLEAN");
     expect(typeMap["js"]).toBe("JSONB");
-    expect(typeMap["dt"]).toContain("TIME WITH TIME ZONE");
+    expect(typeMap["dt"]).toContain("TIMESTAMP WITH TIME ZONE");
     expect(typeMap["str"]).toBe("TEXT");
     
     await db.sql.unsafe(`DROP TABLE "lumora_test_schema"."pg_types_test"`);
