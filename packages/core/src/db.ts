@@ -180,9 +180,14 @@ export class LumoraDatabase {
         max:         config.pool?.max ?? 10,
         idleTimeout: config.pool?.idleTimeout ?? 30_000,
         ssl:         config.ssl ?? false,
-        // @ts-expect-error: bun types might be missing onconnect
-        onconnect:   pgSchema
-          ? async (client: SQL) => { await client.unsafe(`SET search_path = "${pgSchema}"`) }
+        // The first argument is the error object (null on success), the second is the connection.
+        onconnect: pgSchema
+          ? async (err: Error | null, connection?: any) => {
+              if (!err) {
+                const target = connection ?? this.sql;
+                await target.unsafe(`SET search_path = "${pgSchema}"`);
+              }
+            }
           : undefined,
       });
     } else {
