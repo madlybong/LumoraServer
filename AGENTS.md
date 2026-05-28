@@ -23,6 +23,18 @@ Keep the public API small (`defineLumoraConfig`, `defineResource`, `initLumora`)
 3. Demonstrate usage in `apps/starter`.
 4. Add or update tests, then update docs.
 
+## Agentic Hard Rules (The Fail-Safe Workflow)
+
+To prevent broken releases, all agents MUST follow these mandatory patterns:
+
+1. **The Three Environments:** You must reason about 3 environments:
+   - **Local:** Runs all 118 tests if `TEST_PG_URL` is configured in `.env`.
+   - **CI Pull Request:** GitHub Actions with a real postgres service container.
+   - **CI Release (main):** Triggers `npm publish` only after PR is green.
+2. **Release Gate Rule:** Any commit touching `db.ts`, `pg-*.test.ts`, `.github/workflows/*.yml`, or `bun-types` boundaries MUST go through a branch + Pull Request with green CI before merging to `main`. Never push these directly to `main`.
+3. **Type-First Research Rule:** Before writing any code that calls a native `bun:*` API, you MUST open and read the relevant `node_modules/bun-types/*.d.ts` file. Do not guess or use internet examples.
+4. **Scratch File Policy:** Scratch and debug scripts must go in `tools/scratch/`. That directory's `.gitignore` prevents them from being committed. Clean up all scratch files before the final commit on any feature.
+
 ## Safe Extension Heuristics
 
 - **Resource Capabilities:** Extend resource types -> update generated runtime -> add starter example -> add tests -> update docs.
@@ -59,4 +71,3 @@ Release steps:
 - Does it avoid package sprawl or speculative abstractions before there is concrete runtime need?
 - Are commits written in Conventional Commit format (`feat:`, `fix:`, etc.)?
 - Do not document behavior that no longer exists.
-
