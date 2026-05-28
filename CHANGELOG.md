@@ -4,6 +4,24 @@
 
 ---
 
+## [0.6.1] — 2026-05-28
+
+### Added
+
+- add PostgreSQL adapter via bun:postgres (LUR-001) (`99a0f03`)
+
+### Fixed
+
+- correct bun:postgres onconnect hook signature (`b6706e1`)
+- add PostgreSQL service to release workflow (`b7fa008`)
+
+### Maintenance
+
+- bump version to 0.6.0 (`69283e9`)
+
+
+---
+
 ## [0.6.0] — 2026-05-28
 
 ### Added
