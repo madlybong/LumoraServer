@@ -4,6 +4,20 @@
 
 ---
 
+## [0.6.0] — 2026-05-28
+
+### Added
+
+- add PostgreSQL adapter via bun:postgres (LUR-001) (`0179c17`)
+- add mode-aware migration engine (`9a9108b`)
+
+### Maintenance
+
+- bump version to 0.5.1 (`4c0cdc6`)
+
+
+---
+
 ## [0.5.1] — 2026-05-23
 
 ### Added
