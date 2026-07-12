@@ -8,6 +8,26 @@
 
 ### Added
 
+- implement RFC-01 through RFC-06 features (`1af69c0`)
+
+### Documentation
+
+- update docs for v0.7.0 features (`e83e12a`)
+- rewrite AGENTS.md, update rules, add skills playbook (`9e2b5f2`)
+
+### Maintenance
+
+- bump version to 0.7.0 (`cdee2ad`)
+- bump version to 0.6.4 (`cb18577`)
+- add tools/scratch/, local PG setup script, ignore release notes (`637a6bb`)
+
+
+---
+
+## [0.7.0] — 2026-07-12
+
+### Added
+
 - implement RFC-01 through RFC-06 features (`f76d3ff`)
 - add PostgreSQL adapter via bun:postgres (LUR-001) (`99a0f03`)
 
