@@ -381,6 +381,7 @@ export interface LumoraInstance {
   query: import("./query").QueryExecutor;
   /** All loaded resource definitions (inline or file-based). */
   resources: DefineResourceResult[];
+  readonly apiPrefix: string;
   close(): Promise<void>;
 }
 

@@ -692,6 +692,9 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
     : undefined;
 
   return {
+    get apiPrefix() {
+      return apiPrefix(config);
+    },
     app,
     fetch: (request, server) => app.fetch(request, { server } as never),
     websocket,

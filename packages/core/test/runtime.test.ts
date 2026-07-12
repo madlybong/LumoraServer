@@ -104,4 +104,10 @@ describe("initLumora", () => {
     expect(allowed.status).toBe(200);
     await lumora.close();
   });
+
+  test("exposes apiPrefix getter", async () => {
+    const { lumora } = await createFixtureApp();
+    expect(lumora.apiPrefix).toBe("/api/v1");
+    await lumora.close();
+  });
 });
