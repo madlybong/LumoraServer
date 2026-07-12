@@ -18,6 +18,17 @@ The following capabilities landed across the v0.3.0–v0.5.0 releases:
 
 ---
 
+## Shipped in v0.7.0
+
+- Custom Hono router mounting via `mountModule` (RFC-01)
+- Fine-grained PUT/PATCH separation via `updateMethod` (RFC-02)
+- Procedural module context injection `createModuleContext` (RFC-03)
+- Procedural `logAudit` helper (RFC-04)
+- `rateLimit` middleware (RFC-05)
+- Realtime query-token auth for SSE (RFC-06)
+
+---
+
 ## Near term
 
 - polish the `bunx init @astrake/lumora-server` experience

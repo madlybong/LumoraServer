@@ -178,6 +178,8 @@ const data = await lumora.query.execute(
 | LS-10 | AI provider gateway | `instance.ai.chat()`, `getUsage()` |
 | LS-11 | Structured query executor | `instance.query.execute(descriptor, ctx)` |
 | LS-12 | File-based SQL migrations | `bun run lumora migrate` |
+| LS-13 | Custom routing | `instance.mountModule(path, router)` |
+| LS-14 | Rate limiting | `rateLimit(opts)` middleware |
 
 ---
 
