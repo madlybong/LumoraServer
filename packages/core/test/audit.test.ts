@@ -137,4 +137,29 @@ describe("Audit Trail", () => {
 
     await lumora.close();
   });
+
+  test("procedural logAudit helper", async () => {
+    const { lumora, dbPath } = await createFixtureApp("true");
+    const { logAudit } = await import("../src/runtime");
+    
+    await logAudit(lumora.database as any, {
+      entityType: "billing",
+      action: "create",
+      entityId: "inv_123",
+      userId: "user_456",
+      details: { amount: 100 }
+    });
+    
+    const rows = await queryAuditLogs(dbPath);
+    expect(rows.length).toBe(1);
+    const log = rows[0] as any;
+    expect(log.action).toBe("create");
+    expect(log.resource).toBe("billing");
+    expect(log.record_id).toBe("inv_123");
+    expect(log.actor_subject).toBe("user_456");
+    expect(log.actor_strategy).toBe("procedural");
+    expect(JSON.parse(log.new_value).amount).toBe(100);
+
+    await lumora.close();
+  });
 });

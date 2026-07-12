@@ -27,6 +27,29 @@ async function createRealtimeFixture() {
   });
 }
 
+async function createJwtRealtimeFixture() {
+  const root = await mkdtemp(path.join(os.tmpdir(), "lumora-jwt-realtime-"));
+  const routesDir = path.join(root, "routes");
+  await mkdir(routesDir, { recursive: true });
+  await writeFile(
+    path.join(routesDir, "company.ts"),
+    `export default {
+  kind: "resource",
+  resource: "company",
+  fields: { name: { type: "string", required: true } }
+};`
+  );
+
+  return initLumora({
+    name: "jwt-realtime",
+    mode: "development",
+    api: { base: "/api", version: "v1" },
+    auth: { mode: "jwt", secret: "supersecret" },
+    database: { client: "sqlite", url: "sqlite://:memory:" },
+    routes: { dir: routesDir }
+  });
+}
+
 describe("realtime", () => {
   test("publishes SSE and WebSocket messages", async () => {
     const lumora = await createRealtimeFixture();
@@ -67,6 +90,32 @@ describe("realtime", () => {
       text = new TextDecoder().decode(chunk.value);
     }
     expect(text).toContain("created");
+
+    server.stop(true);
+    await lumora.close();
+  });
+
+  test("query-token auth on SSE", async () => {
+    const lumora = await createJwtRealtimeFixture();
+    const server = Bun.serve({
+      port: 0,
+      fetch: lumora.fetch,
+      websocket: lumora.websocket
+    });
+
+    const resNoToken = await fetch(`http://127.0.0.1:${server.port}/api/v1/company/events`);
+    expect(resNoToken.status).toBe(401);
+
+    const resInvalid = await fetch(`http://127.0.0.1:${server.port}/api/v1/company/events?token=invalid`);
+    expect(resInvalid.status).toBe(401);
+
+    const { sign } = await import("hono/jwt");
+    const validToken = await sign({ sub: "user123", exp: Math.floor(Date.now() / 1000) + 3600 }, "supersecret");
+    
+    const resValid = await fetch(`http://127.0.0.1:${server.port}/api/v1/company/events?token=${validToken}`);
+    expect(resValid.status).toBe(200);
+    const reader = resValid.body!.getReader();
+    await reader.read();
 
     server.stop(true);
     await lumora.close();

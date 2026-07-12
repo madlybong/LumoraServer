@@ -7,7 +7,7 @@ function base64UrlDecode(input: string): string {
   return Buffer.from(`${normalized}${pad}`, "base64").toString("utf8");
 }
 
-async function verifyJwt(token: string, config: Extract<LumoraAuthConfig, { mode: "jwt" }>): Promise<LumoraAuthResult> {
+export async function verifyJwtToken(token: string, secret: string): Promise<Record<string, unknown>> {
   const [headerPart, payloadPart, signaturePart] = token.split(".");
   if (!headerPart || !payloadPart || !signaturePart) {
     throw new Error("Malformed JWT token.");
@@ -16,7 +16,7 @@ async function verifyJwt(token: string, config: Extract<LumoraAuthConfig, { mode
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
     "raw",
-    encoder.encode(config.secret),
+    encoder.encode(secret),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"]
@@ -29,15 +29,22 @@ async function verifyJwt(token: string, config: Extract<LumoraAuthConfig, { mode
   }
 
   const claims = JSON.parse(base64UrlDecode(payloadPart)) as Record<string, unknown>;
+
+  if (typeof claims.exp === "number" && claims.exp < Math.floor(Date.now() / 1000)) {
+    throw new Error("JWT token has expired.");
+  }
+
+  return claims;
+}
+
+async function verifyJwt(token: string, config: Extract<LumoraAuthConfig, { mode: "jwt" }>): Promise<LumoraAuthResult> {
+  const claims = await verifyJwtToken(token, config.secret);
+
   if (config.issuer && claims.iss !== config.issuer) {
     throw new Error("Unexpected JWT issuer.");
   }
   if (config.audience && claims.aud !== config.audience) {
     throw new Error("Unexpected JWT audience.");
-  }
-
-  if (typeof claims.exp === "number" && claims.exp < Math.floor(Date.now() / 1000)) {
-    throw new Error("JWT token has expired.");
   }
 
   return {

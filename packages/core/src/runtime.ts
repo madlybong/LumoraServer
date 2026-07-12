@@ -29,7 +29,10 @@ import type {
   ResolvedLumoraConfig,
   ResourceMethod,
   LumoraAuthResult,
-  ResourceExportCsvOptions
+  ResourceExportCsvOptions,
+  AuditLogOpts,
+  LumoraModuleContext,
+  SseAuthOptions
 } from "./types";
 
 type AppVariables = {
@@ -262,7 +265,7 @@ async function writeAudit(
 export async function initLumora(configOrPath: LumoraConfig | string): Promise<LumoraInstance> {
   const config = await loadLumoraConfig(configOrPath);
   const events = new LumoraEventEmitter<LumoraEventMap>();
-  const realtime = new LumoraRealtimeHub();
+  const realtime = new LumoraRealtimeHub(config.auth.mode === "jwt" ? config.auth.secret : undefined);
   const database = new LumoraDatabase(config.database, events);
   const resources: DefineResourceResult[] = config.resources
     ? config.resources
@@ -510,7 +513,8 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
     });
 
 
-    app.put(`${resourceBase}/:id`, async (c) => {
+    const updateHandler = async (c: Context<{ Variables: AppVariables }>) => {
+      const method = c.req.method as "PUT" | "PATCH";
       const auth = await authorize(config, resource, c).catch((err) => {
         logger.event("auth", String(err));
         return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
@@ -518,24 +522,25 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       if (auth instanceof Response) {
         return auth;
       }
-      const denied = await checkPermission(resource, "PUT", auth, c.req.param("id")).catch((err) => {
+      const denied = await checkPermission(resource, method, auth, c.req.param("id")).catch((err) => {
         logger.error("permit", err, c.get("requestId"));
         return err instanceof Response ? err : new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 403, headers: { "Content-Type": "application/json" } });
       });
       if (denied) return denied;
+      const id = c.req.param("id") as string;
       const requestId = c.get("requestId");
       const payload = validatePayload(resource, parseBody(await c.req.json().catch(() => ({}))), "update");
       const input = resource.hooks?.beforeUpdate
-        ? await resource.hooks.beforeUpdate({ id: c.req.param("id"), input: payload, auth, resource, database })
+        ? await resource.hooks.beforeUpdate({ id, input: payload, auth, resource, database })
         : payload;
-      const audit = buildAudit("PUT", new URL(c.req.url).pathname, requestId);
-      const existingSnapshot = await database.get(resource, c.req.param("id")) || {};
+      const audit = buildAudit(method, new URL(c.req.url).pathname, requestId);
+      const existingSnapshot = await database.get(resource, id) || {};
       events.emit("resource:update:before", { resource: resource.resource, action: "updated", record: input, audit });
-      const record = await database.update(resource, c.req.param("id"), input, audit);
+      const record = await database.update(resource, id, input, audit);
       if (!record) {
         return c.json({ ok: false, error: "Not found" }, 404);
       }
-      await writeAudit(database, resource, "update", auth, audit, existingSnapshot, record, c.req.param("id"));
+      await writeAudit(database, resource, "update", auth, audit, existingSnapshot, record, id);
       await resource.hooks?.afterUpdate?.(record);
       const eventPayload: ResourceEventPayload = { resource: resource.resource, action: "updated", record, audit };
       events.emit("resource:update:after", eventPayload);
@@ -543,42 +548,15 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       events.emit(`resource:${resource.resource}:afterUpdate`, eventPayload);
       realtime.publish(eventPayload);
       return c.json({ ok: true, data: record });
-    });
+    };
 
-    app.patch(`${resourceBase}/:id`, async (c) => {
-      const auth = await authorize(config, resource, c).catch((err) => {
-        logger.event("auth", String(err));
-        return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
-      });
-      if (auth instanceof Response) {
-        return auth;
-      }
-      const denied = await checkPermission(resource, "PATCH", auth, c.req.param("id")).catch((err) => {
-        logger.error("permit", err, c.get("requestId"));
-        return err instanceof Response ? err : new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 403, headers: { "Content-Type": "application/json" } });
-      });
-      if (denied) return denied;
-      const requestId = c.get("requestId");
-      const payload = validatePayload(resource, parseBody(await c.req.json().catch(() => ({}))), "update");
-      const input = resource.hooks?.beforeUpdate
-        ? await resource.hooks.beforeUpdate({ id: c.req.param("id"), input: payload, auth, resource, database })
-        : payload;
-      const audit = buildAudit("PATCH", new URL(c.req.url).pathname, requestId);
-      const existingSnapshot = await database.get(resource, c.req.param("id")) || {};
-      events.emit("resource:update:before", { resource: resource.resource, action: "updated", record: input, audit });
-      const record = await database.update(resource, c.req.param("id"), input, audit);
-      if (!record) {
-        return c.json({ ok: false, error: "Not found" }, 404);
-      }
-      await writeAudit(database, resource, "update", auth, audit, existingSnapshot, record, c.req.param("id"));
-      await resource.hooks?.afterUpdate?.(record);
-      const eventPayload: ResourceEventPayload = { resource: resource.resource, action: "updated", record, audit };
-      events.emit("resource:update:after", eventPayload);
-      // LS-6: namespaced per-resource event
-      events.emit(`resource:${resource.resource}:afterUpdate`, eventPayload);
-      realtime.publish(eventPayload);
-      return c.json({ ok: true, data: record });
-    });
+    const updateMethod = resource.updateMethod ?? "both";
+    if (updateMethod === "put" || updateMethod === "both") {
+      app.put(`${resourceBase}/:id`, updateHandler);
+    }
+    if (updateMethod === "patch" || updateMethod === "both") {
+      app.patch(`${resourceBase}/:id`, updateHandler);
+    }
 
     app.delete(`${resourceBase}/:id`, async (c) => {
       const auth = await authorize(config, resource, c).catch((err) => {
@@ -611,7 +589,10 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       return c.json({ ok: true, data: record });
     });
 
-    app.get(`${resourceBase}/${config.realtime.sseSuffix}`, (c) => realtime.createSseResponse(resource.resource));
+    app.get(`${resourceBase}/${config.realtime.sseSuffix}`, (c) => {
+      const authOpts: SseAuthOptions = config.auth.mode === "jwt" ? { mode: "query-token" } : { mode: "none" };
+      return realtime.createSseResponse(resource.resource, c, authOpts);
+    });
     app.get(
       `${resourceBase}/${config.realtime.websocketSuffix}`,
       upgradeWebSocket((c) => ({
@@ -691,9 +672,13 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
     ? startScheduler(config.schedule, { database, logger })
     : undefined;
 
-  return {
+  const instance: LumoraInstance = {
     get apiPrefix() {
       return apiPrefix(config);
+    },
+    mountModule(path, router) {
+      app.route(`${apiPrefix(config)}${path}`, router);
+      return this;
     },
     app,
     fetch: (request, server) => app.fetch(request, { server } as never),
@@ -720,5 +705,35 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       events.emit("lifecycle:close", { name: config.name });
     }
   };
+  return instance;
 }
 
+export async function logAudit(db: LumoraDatabase, opts: AuditLogOpts): Promise<void> {
+  try {
+    await db.writeAuditLog({
+      resource: opts.entityType,
+      action: opts.action as "create" | "update" | "delete",
+      record_id: opts.entityId,
+      actor_subject: opts.userId,
+      actor_strategy: "procedural",
+      old_value: JSON.stringify(opts.details ?? {}),
+      new_value: JSON.stringify(opts.details ?? {}),
+      request_id: crypto.randomUUID(),
+      request_path: opts.entityType,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    // Audit failures must never propagate
+    console.error("[lumora:audit] failed:", (err as Error).message);
+  }
+}
+
+export function createModuleContext(instance: LumoraInstance): LumoraModuleContext {
+  return {
+    db: instance.database,
+    auth: instance.config.auth,
+    ai: instance.ai,
+    realtime: instance.realtime,
+    logAudit: (opts) => logAudit(instance.database, opts),
+  };
+}

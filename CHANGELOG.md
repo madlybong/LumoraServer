@@ -4,6 +4,31 @@
 
 ---
 
+## [0.7.0] — 2026-07-12
+
+### Added
+
+- add PostgreSQL adapter via bun:postgres (LUR-001) (`99a0f03`)
+
+### Fixed
+
+- correct PostgreSQL search_path and timestamp assertions (`b0b2186`)
+- use PostgreSQL startup params for search_path, remove invalid min option (`06eac94`)
+- correct bun:postgres onconnect hook signature (`b6706e1`)
+- add PostgreSQL service to release workflow (`b7fa008`)
+
+### Maintenance
+
+- bump version to 0.6.4 (`f6ffb52`)
+- add tools/scratch/, local PG setup script, ignore release notes (`637a6bb`)
+- bump version to 0.6.3 (`b8a2331`)
+- bump version to 0.6.2 (`07eae25`)
+- bump version to 0.6.1 (`61aab2d`)
+- bump version to 0.6.0 (`69283e9`)
+
+
+---
+
 ## [0.6.4] — 2026-07-12
 
 ### Added

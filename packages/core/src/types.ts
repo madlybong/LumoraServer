@@ -1,5 +1,5 @@
 import type { BunWebSocketHandler } from "hono/bun";
-import type { Hono } from "hono";
+import type { Hono, Context } from "hono";
 import type { LumoraEmailConfig, LumoraEmailService } from "./email";
 import type { LumoraAIConfig, LumoraAIService, LumoraAIChatMessage, AIUsageSummary } from "./ai";
 
@@ -157,6 +157,7 @@ export interface ResourceSchema<TFields extends ResourceFields = ResourceFields>
   bulk?: { transactional?: boolean };
   // LS-5: CSV export endpoint
   export?: ResourceExportConfig;
+  updateMethod?: "put" | "patch" | "both";
 }
 
 export interface DefineResourceResult<TFields extends ResourceFields = ResourceFields> extends ResourceSchema<TFields> {
@@ -353,11 +354,17 @@ export interface OpenApiDocument {
   paths: Record<string, Record<string, unknown>>;
 }
 
+export type SseAuthOptions =
+  | { mode: "bearer-header" }
+  | { mode: "query-token"; secret?: string }
+  | { mode: "none" };
+
 export interface LumoraRealtime {
   publish(payload: ResourceEventPayload): void;
   subscribe(resource: string, listener: (payload: ResourceEventPayload) => void): () => void;
   // LS-7: broadcast a custom event to all connected clients on a topic
   broadcast(topic: string, data: unknown): void;
+  createSseResponse(resource: string, c?: Context, options?: SseAuthOptions): Response | Promise<Response>;
 }
 
 export interface LumoraInstance {
@@ -382,8 +389,31 @@ export interface LumoraInstance {
   /** All loaded resource definitions (inline or file-based). */
   resources: DefineResourceResult[];
   readonly apiPrefix: string;
+  mountModule(path: string, router: Hono<any>): this;
   close(): Promise<void>;
 }
+
+export interface AuditLogOpts {
+  userId: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  /** Safe metadata only. PII (names, phone, diagnosis) must NOT be included. */
+  details?: Record<string, unknown>;
+}
+
+export interface LumoraModuleContext {
+  db: import("./db").LumoraDatabase;
+  auth: LumoraAuthConfig;
+  ai?: LumoraAIService;
+  realtime?: LumoraRealtime;
+  logAudit: (opts: AuditLogOpts) => Promise<void>;
+}
+
+export type LumoraHonoVariables = {
+  user: Record<string, unknown>;
+  userRole: string;
+};
 
 export interface TypedEventEmitter<TMap extends object> {
   on<TKey extends keyof TMap>(event: TKey, listener: (payload: TMap[TKey]) => void): () => void;

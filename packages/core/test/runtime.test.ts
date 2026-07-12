@@ -110,4 +110,28 @@ describe("initLumora", () => {
     expect(lumora.apiPrefix).toBe("/api/v1");
     await lumora.close();
   });
+
+  test("mountModule mounts custom router", async () => {
+    const { lumora } = await createFixtureApp();
+    const { Hono } = await import("hono");
+    const router = new Hono();
+    router.get("/hello", (c) => c.text("world"));
+    lumora.mountModule("/custom", router);
+    
+    const res = await lumora.app.request("/api/v1/custom/hello");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("world");
+    await lumora.close();
+  });
+
+  test("createModuleContext returns correct shape", async () => {
+    const { lumora } = await createFixtureApp();
+    const { createModuleContext } = await import("../src/runtime");
+    const ctx = createModuleContext(lumora);
+    
+    expect(ctx.db).toBeDefined();
+    expect(ctx.auth).toBeDefined();
+    expect(ctx.logAudit).toBeTypeOf("function");
+    await lumora.close();
+  });
 });

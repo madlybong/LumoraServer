@@ -1,4 +1,6 @@
-import type { ResourceEventPayload, LumoraRealtime } from "./types";
+import { verifyJwtToken } from "./auth";
+import type { ResourceEventPayload, LumoraRealtime, SseAuthOptions } from "./types";
+import type { Context } from "hono";
 
 interface SseClient {
   controller: ReadableStreamDefaultController<string>;
@@ -13,6 +15,8 @@ export class LumoraRealtimeHub implements LumoraRealtime {
   private readonly listeners = new Map<string, Set<(payload: ResourceEventPayload) => void>>();
   private readonly sseClients = new Map<string, Set<SseClient>>();
   private readonly sockets = new Map<string, Set<SocketLike>>();
+
+  constructor(private readonly authSecret?: string) {}
 
   publish(payload: ResourceEventPayload): void {
     const resourceListeners = this.listeners.get(payload.resource) ?? new Set();
@@ -63,7 +67,26 @@ export class LumoraRealtimeHub implements LumoraRealtime {
     };
   }
 
-  createSseResponse(resource: string): Response {
+  async createSseResponse(resource: string, c?: Context, options?: SseAuthOptions): Promise<Response> {
+    const authOpts = options ?? { mode: "none" };
+
+    if (authOpts.mode === "query-token") {
+      if (!c) throw new Error("Context required for query-token SSE auth");
+      const token = c.req.query("token");
+      if (!token) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      const secret = authOpts.secret ?? this.authSecret;
+      if (!secret) {
+        return Response.json({ error: "No JWT secret configured" }, { status: 503 });
+      }
+      try {
+        await verifyJwtToken(token, secret);
+      } catch {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+    }
+
     const client: Partial<SseClient> = {};
     const stream = new ReadableStream<string>({
       start: (controller) => {

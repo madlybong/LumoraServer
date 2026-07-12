@@ -21,6 +21,26 @@ async function createFixtureApp() {
 };`
   );
 
+  await writeFile(
+    path.join(routesDir, "put_only.ts"),
+    `export default {
+  kind: "resource",
+  resource: "put_only",
+  updateMethod: "put",
+  fields: { title: { type: "string" } }
+};`
+  );
+
+  await writeFile(
+    path.join(routesDir, "patch_only.ts"),
+    `export default {
+  kind: "resource",
+  resource: "patch_only",
+  updateMethod: "patch",
+  fields: { title: { type: "string" } }
+};`
+  );
+
   const lumora = await initLumora({
     name: "fixture",
     mode: "development",
@@ -69,6 +89,46 @@ describe("PATCH route", () => {
     });
     expect(patchRes.status).toBe(404);
 
+    await lumora.close();
+  });
+
+  test("updateMethod: 'put' restricts PATCH route", async () => {
+    const { lumora } = await createFixtureApp();
+    const patchRes = await lumora.app.request("/api/v1/put_only/1", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Nope" })
+    });
+    expect(patchRes.status).toBe(404);
+    expect(await patchRes.text()).not.toContain('"ok":false');
+
+    const putRes = await lumora.app.request("/api/v1/put_only/1", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Yes" })
+    });
+    expect(putRes.status).toBe(404);
+    expect(await putRes.text()).toContain('"ok":false');
+    await lumora.close();
+  });
+
+  test("updateMethod: 'patch' restricts PUT route", async () => {
+    const { lumora } = await createFixtureApp();
+    const putRes = await lumora.app.request("/api/v1/patch_only/1", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Nope" })
+    });
+    expect(putRes.status).toBe(404);
+    expect(await putRes.text()).not.toContain('"ok":false');
+
+    const patchRes = await lumora.app.request("/api/v1/patch_only/1", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Yes" })
+    });
+    expect(patchRes.status).toBe(404);
+    expect(await patchRes.text()).toContain('"ok":false');
     await lumora.close();
   });
 });
