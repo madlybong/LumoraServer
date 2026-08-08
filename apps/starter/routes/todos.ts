@@ -23,7 +23,8 @@ export default defineResource({
   },
   audit: true,
   bulk: { transactional: true },
-  export: { csv: true },
+  export: { csv: { maxRows: 5000 } },
   auth: { mode: "inherit" },
+  rateLimit: { max: 30, windowMs: 60000 },
   query: { defaultPageSize: 20, maxPageSize: 100 },
 });

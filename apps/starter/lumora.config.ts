@@ -5,9 +5,9 @@ export default defineLumoraConfig({
   mode: "development",
   api:  { base: "/api", version: "v1" },
   auth: { mode: "disabled" },
-  database: { client: "sqlite", url: "sqlite://./apps/starter/lumora.db" },
+  database: { client: "sqlite", url: "sqlite://./lumora.db" },
   routes: { dir: "./routes" },
-  migrations: { dir: "./apps/starter/migrations/sqlite" },
+  migrations: { dir: "./migrations/sqlite" },
   docs: { enabled: true },
   cors: { origin: "*" },
   rateLimit: {

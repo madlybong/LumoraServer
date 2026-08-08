@@ -15,6 +15,7 @@ import { createAIService } from "./ai";
 import { LumoraLogger } from "./logger";
 import { handleFileUpload, hasFileFields, serveUploadedFile } from "./upload";
 import { exportToCsv, getCsvFilename } from "./export";
+import { rateLimit, MemoryRateLimitStore, PostgresRateLimitStore } from "./rate-limit";
 import { startScheduler } from "./scheduler";
 import { createQueryExecutor } from "./query";
 import { LumoraMigrationEngine } from "./migrations";
@@ -77,6 +78,13 @@ function validatePayload(
   return output;
 }
 
+function errorResponse(message: string, status: number, requestId?: string): Response {
+  return new Response(
+    JSON.stringify({ ok: false, error: message, ...(requestId ? { requestId } : {}) }),
+    { status, headers: { "Content-Type": "application/json" } }
+  );
+}
+
 // LS-1: Resolve computed/virtual fields for a single record (read-only, never stored)
 async function resolveComputed(
   record: Record<string, unknown>,
@@ -131,6 +139,51 @@ async function resolveIncludes(
   }
 
   return resolved;
+}
+
+async function resolveIncludesBatch(
+  records: Record<string, unknown>[],
+  resource: import("./types").DefineResourceResult,
+  includes: string[],
+  allResources: import("./types").DefineResourceResult[],
+  database: import("./db").LumoraDatabase
+): Promise<Record<string, unknown>[]> {
+  if (!resource.relations || includes.length === 0) return records;
+  const result = records.map(r => ({ ...r })); // shallow clone each record
+
+  for (const includeName of includes) {
+    const relation = resource.relations[includeName];
+    if (!relation) continue;
+    const relatedResource = allResources.find(r => r.resource === relation.resource);
+    if (!relatedResource) continue;
+
+    if (relation.type === "belongsTo") {
+      const matchField = relation.matchOn ?? "id";
+      const fkValues = [...new Set(
+        result.map(r => r[relation.foreignKey]).filter(v => v != null) as string[]
+      )];
+      let lookup: Map<string, Record<string, unknown>>;
+      if (matchField === "id") {
+        lookup = await database.getByIds(relatedResource, fkValues);
+      } else {
+        const rows = await database.listByIds(relatedResource, matchField, fkValues);
+        lookup = new Map(rows.map(r => [String(r[matchField]), r]));
+      }
+      for (const record of result) {
+        const fkVal = record[relation.foreignKey];
+        record[includeName] = fkVal != null ? (lookup.get(String(fkVal)) ?? null) : null;
+      }
+    } else if (relation.type === "hasMany") {
+      const parentIds = result.map(r => r.id).filter(v => v != null) as string[];
+      const allRelated = await database.listByIds(relatedResource, relation.foreignKey, parentIds);
+      for (const record of result) {
+        record[includeName] = allRelated.filter(
+          r => String(r[relation.foreignKey]) === String(record.id)
+        );
+      }
+    }
+  }
+  return result;
 }
 
 function filterFieldsByRole(
@@ -326,7 +379,7 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       app.use(p, async (c, next) => {
         const auth = await authorize(config, { kind: "resource", resource: "_root", fields: {} }, c).catch((err) => {
           logger.event("auth", String(err));
-          return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
+          return errorResponse(String(err), 401, c.get("requestId"));
         });
         if (auth instanceof Response) return auth;
         await next();
@@ -341,7 +394,7 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       return c.json({ ok: true, data }, status as any);
     });
     c.set("lumoraError", (message: string, status = 400) => {
-      return c.json({ ok: false, error: message }, status as any);
+      return c.json({ ok: false, error: message, requestId: c.get("requestId") }, status as any);
     });
     const start = Date.now();
     await next();
@@ -364,6 +417,10 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
     ? createAIService(config.ai, database.sql)
     : undefined;
 
+  const rateLimitStore = config.rateLimit.enabled 
+    ? (config.rateLimit.store === "database" ? new PostgresRateLimitStore(database.sql, (config.database as any).schema) : new MemoryRateLimitStore())
+    : undefined;
+
   logger.event("init", "starting lumora instance...");
   events.emit("lifecycle:init", { config });
 
@@ -371,18 +428,32 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
     await database.ensureResource(resource);
     const resourceBase = `${apiPrefix(config)}/${normalizeResourcePath(resource.resource)}`.replace(/\/+/g, "/");
 
+    const globalRl  = config.rateLimit;
+    const resourceRl = resource.rateLimit;
+    const applyRl   = globalRl.enabled && !resourceRl?.disabled;
+
+    if (applyRl) {
+      const effectiveMax      = resourceRl?.max      ?? globalRl.max;
+      const effectiveWindowMs = resourceRl?.windowMs ?? globalRl.windowMs;
+      app.use(`${resourceBase}/*`, rateLimit({
+        limit:    effectiveMax,
+        windowMs: effectiveWindowMs,
+        store:    rateLimitStore,
+      }));
+    }
+
     app.get(resourceBase, async (c) => {
       const auth = await authorize(config, resource, c).catch((err) => {
         // Auth errors (expired tokens, bad credentials) are expected user-level errors; log verbosely only
         logger.event("auth", String(err));
-        return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
+        return errorResponse(String(err), 401, c.get("requestId"));
       });
       if (auth instanceof Response) {
         return auth;
       }
       const denied = await checkPermission(resource, "GET_LIST", auth).catch((err) => {
         logger.error("permit", err, c.get("requestId"));
-        return err instanceof Response ? err : new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 403, headers: { "Content-Type": "application/json" } });
+        return err instanceof Response ? err : errorResponse(String(err), 403, c.get("requestId"));
       });
       if (denied) return denied;
       const page = Number(c.req.query("page") ?? 1);
@@ -410,19 +481,19 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       const includeParam = c.req.query("include");
       const includes = includeParam ? includeParam.split(",").map((s) => s.trim()).filter(Boolean) : [];
       let items = result.items;
-      if (resource.computed || includes.length > 0) {
+      if (includes.length > 0) {
+        items = await resolveIncludesBatch(items, resource, includes, resources, database);
+      }
+      if (resource.computed) {
         items = await Promise.all(
-          items.map(async (record) => {
-            let r = record;
-            if (resource.computed) r = await resolveComputed(r, resource, auth, database);
-            if (includes.length > 0) r = await resolveIncludes(r, resource, includes, resources, database);
-            return r;
-          })
+          items.map(async (record) => await resolveComputed(record, resource, auth, database))
         );
       }
       const userRoles = auth?.roles ?? (auth?.claims?.roles as string[] | undefined) ?? [];
       items = items.map(record => filterFieldsByRole(record, resource, userRoles));
-      return c.json({ ok: true, data: items, total: result.total, page: result.page, pageSize: result.pageSize });
+      const totalPages = result.pageSize > 0 ? Math.ceil(result.total / result.pageSize) : 0;
+      const hasNextPage = result.page < totalPages;
+      return c.json({ ok: true, data: items, total: result.total, page: result.page, pageSize: result.pageSize, totalPages, hasNextPage });
     });
 
     // LS-5: CSV export endpoint (only if resource declares export.csv)
@@ -431,18 +502,19 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       app.get(`${resourceBase}/export/csv`, async (c) => {
         const auth = await authorize(config, resource, c).catch((err) => {
           logger.event("auth", String(err));
-          return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
+          return errorResponse(String(err), 401, c.get("requestId"));
         });
         if (auth instanceof Response) return auth;
         const denied = await checkPermission(resource, "GET_LIST", auth);
         if (denied) return denied;
         // Export up to 10,000 records with any active filters/search applied
+        const maxRows = csvOpts.maxRows ?? 10_000;
         const result = await database.list(resource, {
           filters: new URL(c.req.url).searchParams,
           search: c.req.query("search"),
           sort: c.req.query("sort"),
           page: 1,
-          pageSize: 10000
+          pageSize: maxRows
         });
         const csv = exportToCsv(result.items, resource, csvOpts);
         const filename = getCsvFilename(resource, csvOpts);
@@ -461,7 +533,7 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
         if (resource.readOnly) return c.json({ ok: false, error: "Method Not Allowed" }, 405);
         const auth = await authorize(config, resource, c).catch((err) => {
           logger.event("auth", String(err));
-          return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
+          return errorResponse(String(err), 401, c.get("requestId"));
         });
         if (auth instanceof Response) return auth;
         const denied = await checkPermission(resource, "POST", auth);
@@ -517,14 +589,14 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       if (resource.readOnly) return c.json({ ok: false, error: "Method Not Allowed" }, 405);
       const auth = await authorize(config, resource, c).catch((err) => {
         logger.event("auth", String(err));
-        return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
+        return errorResponse(String(err), 401, c.get("requestId"));
       });
       if (auth instanceof Response) {
         return auth;
       }
       const denied = await checkPermission(resource, "POST", auth).catch((err) => {
         logger.error("permit", err, c.get("requestId"));
-        return err instanceof Response ? err : new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 403, headers: { "Content-Type": "application/json" } });
+        return err instanceof Response ? err : errorResponse(String(err), 403, c.get("requestId"));
       });
       if (denied) return denied;
       const requestId = c.get("requestId");
@@ -574,14 +646,14 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       const method = c.req.method as "PUT" | "PATCH";
       const auth = await authorize(config, resource, c).catch((err) => {
         logger.event("auth", String(err));
-        return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
+        return errorResponse(String(err), 401, c.get("requestId"));
       });
       if (auth instanceof Response) {
         return auth;
       }
       const denied = await checkPermission(resource, method, auth, c.req.param("id")).catch((err) => {
         logger.error("permit", err, c.get("requestId"));
-        return err instanceof Response ? err : new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 403, headers: { "Content-Type": "application/json" } });
+        return err instanceof Response ? err : errorResponse(String(err), 403, c.get("requestId"));
       });
       if (denied) return denied;
       const id = c.req.param("id") as string;
@@ -620,14 +692,14 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       if (resource.readOnly || resource.immutable) return c.json({ ok: false, error: "Method Not Allowed" }, 405);
       const auth = await authorize(config, resource, c).catch((err) => {
         logger.event("auth", String(err));
-        return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
+        return errorResponse(String(err), 401, c.get("requestId"));
       });
       if (auth instanceof Response) {
         return auth;
       }
       const denied = await checkPermission(resource, "DELETE", auth, c.req.param("id")).catch((err) => {
         logger.error("permit", err, c.get("requestId"));
-        return err instanceof Response ? err : new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 403, headers: { "Content-Type": "application/json" } });
+        return err instanceof Response ? err : errorResponse(String(err), 403, c.get("requestId"));
       });
       if (denied) return denied;
       const requestId = c.get("requestId");
@@ -684,14 +756,14 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
     app.get(`${resourceBase}/:id`, async (c) => {
       const auth = await authorize(config, resource, c).catch((err) => {
         logger.event("auth", String(err));
-        return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
+        return errorResponse(String(err), 401, c.get("requestId"));
       });
       if (auth instanceof Response) {
         return auth;
       }
       const denied = await checkPermission(resource, "GET_ONE", auth, c.req.param("id")).catch((err) => {
         logger.error("permit", err, c.get("requestId"));
-        return err instanceof Response ? err : new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 403, headers: { "Content-Type": "application/json" } });
+        return err instanceof Response ? err : errorResponse(String(err), 403, c.get("requestId"));
       });
       if (denied) return denied;
       let record = await database.get(resource, c.req.param("id"));
@@ -744,7 +816,7 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
         app.use(`${apiPrefix(config)}${path}/*`, async (c, next) => {
           const auth = await authorize(config, { kind: "resource", resource: "_module", fields: {} }, c).catch((err) => {
             logger.event("auth", String(err));
-            return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
+            return errorResponse(String(err), 401, c.get("requestId"));
           });
           if (auth instanceof Response) return auth;
           await next();
@@ -803,9 +875,9 @@ export function logAudit(db: LumoraDatabase, opts: AuditLogOpts, options?: { str
         action: opts.action as "create" | "update" | "delete",
         record_id: opts.entityId,
         actor_subject: opts.userId,
-        actor_strategy: "procedural",
-        old_value: JSON.stringify(opts.details ?? {}),
-        new_value: JSON.stringify(opts.details ?? {}),
+        actor_strategy: opts.actorStrategy ?? "procedural",
+        old_value: JSON.stringify(opts.before ?? opts.details ?? {}),
+        new_value: JSON.stringify(opts.after ?? opts.details ?? {}),
         request_id: crypto.randomUUID(),
         request_path: opts.entityType,
         timestamp: new Date().toISOString(),

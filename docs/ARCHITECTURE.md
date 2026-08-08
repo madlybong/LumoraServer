@@ -206,3 +206,19 @@ bun run lumora migrate --dry-run
 `ensureResource()` still runs `CREATE TABLE IF NOT EXISTS` for each declared resource. This handles first-boot table creation and keeps zero-migration projects working without any migration files.
 
 Migrations take over for schema **evolution**: new columns, index changes, data back-fills, and any DDL that `ensureResource` cannot express.
+
+## Audit Logs
+
+Lumora v0.8.1 introduces automatic audit logging:
+
+- Enable via `audit: true` in the resource config.
+- Creates `_audit_logs` (PostgreSQL) or `lumora_audit_logs` (SQLite) table.
+- Captures `old_value` and `new_value` snapshots for every create/update/delete operation.
+- Records `actor_subject` and `actor_strategy` from the active authentication context.
+
+## Pagination & Query DSL
+
+v0.8.1 adds:
+- **Pagination Metadata**: `totalPages` and `hasNextPage` are included in list responses.
+- **Filter Operators**: Append `__gt`, `__lt`, `__in`, `__neq`, `__like`, or `__ilike` to query params (e.g. `?age__gt=21`).
+- **Batch Includes**: Relational loading uses a batched query pattern (solving N+1).

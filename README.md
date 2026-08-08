@@ -192,6 +192,8 @@ const data = await lumora.query.execute(
 | LS-12 | File-based SQL migrations | `bun run lumora migrate` |
 | LS-13 | Custom routing | `instance.mountModule(path, router)` |
 | LS-14 | Rate limiting | `rateLimit(opts)` middleware |
+| LS-15 | Advanced Filtering | `?field__gt=10`, `__in`, `__like` |
+| LS-16 | Audit Logs | `audit: true` in `defineResource()` |
 
 ---
 

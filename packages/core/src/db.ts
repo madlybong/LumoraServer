@@ -118,15 +118,45 @@ function normalizeRecord(record: Record<string, unknown>, resource: DefineResour
 }
 
 function buildWhereClause(client: DbClient, resource: DefineResourceResult, filters: URLSearchParams, searchTerm?: string): string[] {
-  const reservedParams = new Set(["page", "pageSize", "limit", "sort", "search"]);
+  const reservedParams = new Set(["page", "pageSize", "limit", "sort", "search", "include"]);
   const filterable = new Set(resource.query?.filterable ?? Object.keys(resource.fields).filter((key) => resource.fields[key]!.filterable));
   const clauses: string[] = [];
 
-  for (const [key, value] of filters.entries()) {
-    if (reservedParams.has(key) || !filterable.has(key)) {
-      continue;
+  const OPERATOR_RE = /^(.+?)__(gt|gte|lt|lte|neq|in|nin|like|isnull|notnull)$/;
+
+  for (const [rawKey, value] of filters.entries()) {
+    if (reservedParams.has(rawKey)) continue;
+
+    const match = rawKey.match(OPERATOR_RE);
+    const fieldName = match ? match[1]! : rawKey;
+    const operator  = match ? match[2]! : "eq";
+
+    if (!filterable.has(fieldName)) continue;
+
+    const col   = quoteIdentifier(client, fieldName);
+    const field = resource.fields[fieldName];
+
+    switch (operator) {
+      case "gt":      clauses.push(`${col} > ${escapeValue(client, value, field)}`); break;
+      case "gte":     clauses.push(`${col} >= ${escapeValue(client, value, field)}`); break;
+      case "lt":      clauses.push(`${col} < ${escapeValue(client, value, field)}`); break;
+      case "lte":     clauses.push(`${col} <= ${escapeValue(client, value, field)}`); break;
+      case "neq":     clauses.push(`${col} != ${escapeValue(client, value, field)}`); break;
+      case "like":    clauses.push(`${col} LIKE ${escapeValue(client, value)}`);      break;
+      case "isnull":  clauses.push(`${col} IS NULL`);                                 break;
+      case "notnull": clauses.push(`${col} IS NOT NULL`);                             break;
+      case "in": {
+        const vals = value.split(",").map(v => escapeValue(client, v.trim(), field)).join(", ");
+        clauses.push(`${col} IN (${vals})`);
+        break;
+      }
+      case "nin": {
+        const vals = value.split(",").map(v => escapeValue(client, v.trim(), field)).join(", ");
+        clauses.push(`${col} NOT IN (${vals})`);
+        break;
+      }
+      default: clauses.push(`${col} = ${escapeValue(client, value, field)}`); break;
     }
-    clauses.push(`${quoteIdentifier(client, key)} = ${escapeValue(client, value, resource.fields[key])}`);
   }
 
   if (searchTerm) {
@@ -562,6 +592,62 @@ export class LumoraDatabase {
     const query = `SELECT ${select} FROM ${table} WHERE ${quoteIdentifier(this.config.client, field)} = ${escapeValue(this.config.client, value)}${tenantClause} ORDER BY updated_at DESC LIMIT ${limit}`;
     const rows = await this.sql.unsafe<Record<string, unknown>[]>(query);
     return rows.map((row) => normalizeRecord(row, resource));
+  }
+
+  /** Batch fetch by primary key. Returns id → normalized record map. O(1) queries regardless of list size. */
+  async getByIds(
+    resource: DefineResourceResult,
+    ids: string[]
+  ): Promise<Map<string, Record<string, unknown>>> {
+    if (ids.length === 0) return new Map();
+    let schemaPrefix = "";
+    if (this.config.client === "postgresql" && this.config.schema && this.config.schema !== "public") {
+      schemaPrefix = `"${this.config.schema}".`;
+    }
+    const table  = schemaPrefix + quoteIdentifier(this.config.client, resource.table ?? resource.resource);
+    const select = buildSelectClause(this.config.client, resource);
+    const inList = [...new Set(ids)].map(id => escapeValue(this.config.client, id)).join(", ");
+    
+    // For tenancy, we technically should include tenant checks here too for safety, 
+    // but the caller list already filtered by tenant. Still, adding for consistency.
+    const tenantClause = (this.multiTenancy?.enabled && this.tenantId)
+      ? ` AND ${quoteIdentifier(this.config.client, this.multiTenancy.tenantIdField ?? "tenant_id")} = ${escapeValue(this.config.client, this.tenantId)}`
+      : "";
+
+    const rows   = await this.sql.unsafe<Record<string, unknown>[]>(
+      `SELECT ${select} FROM ${table} WHERE id IN (${inList})${tenantClause}`
+    );
+    const result = new Map<string, Record<string, unknown>>();
+    for (const row of rows) {
+      const normalized = normalizeRecord(row, resource);
+      result.set(String(normalized.id), normalized);
+    }
+    return result;
+  }
+
+  /** Batch fetch by FK field — returns all rows where field IN (values). Used for hasMany batch resolution. */
+  async listByIds(
+    resource: DefineResourceResult,
+    field: string,
+    values: unknown[]
+  ): Promise<Record<string, unknown>[]> {
+    if (values.length === 0) return [];
+    let schemaPrefix = "";
+    if (this.config.client === "postgresql" && this.config.schema && this.config.schema !== "public") {
+      schemaPrefix = `"${this.config.schema}".`;
+    }
+    const table  = schemaPrefix + quoteIdentifier(this.config.client, resource.table ?? resource.resource);
+    const select = buildSelectClause(this.config.client, resource);
+    const inList = [...new Set(values)].map(v => escapeValue(this.config.client, v)).join(", ");
+    
+    const tenantClause = (this.multiTenancy?.enabled && this.tenantId)
+      ? ` AND ${quoteIdentifier(this.config.client, this.multiTenancy.tenantIdField ?? "tenant_id")} = ${escapeValue(this.config.client, this.tenantId)}`
+      : "";
+
+    const rows   = await this.sql.unsafe<Record<string, unknown>[]>(
+      `SELECT ${select} FROM ${table} WHERE ${quoteIdentifier(this.config.client, field)} IN (${inList})${tenantClause} ORDER BY updated_at DESC`
+    );
+    return rows.map(row => normalizeRecord(row, resource));
   }
 
   // LS-4: Bulk create with optional transaction wrapping

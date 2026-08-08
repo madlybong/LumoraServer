@@ -4,6 +4,13 @@
 
 ---
 
+## [0.8.1] — 2026-08-08
+
+_No conventional commits found in this range._
+
+
+---
+
 ## [0.8.0] — 2026-08-08
 
 ### Added
