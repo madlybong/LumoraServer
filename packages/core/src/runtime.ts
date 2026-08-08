@@ -37,6 +37,9 @@ import type {
 
 type AppVariables = {
   requestId: string;
+  lumoraJson: (data: unknown, status?: number) => Response;
+  lumoraError: (message: string, status?: number) => Response;
+  jwtPayload?: unknown;
 };
 
 function apiPrefix(config: ResolvedLumoraConfig): string {
@@ -128,6 +131,22 @@ async function resolveIncludes(
   }
 
   return resolved;
+}
+
+function filterFieldsByRole(
+  record: Record<string, unknown>,
+  resource: DefineResourceResult,
+  userRoles: string[]
+): Record<string, unknown> {
+  const filtered: Record<string, unknown> = { ...record };
+  for (const [name, field] of Object.entries(resource.fields)) {
+    if (field.visibleTo && field.visibleTo.length > 0) {
+      if (!userRoles.includes("super-admin") && !field.visibleTo.some((r) => userRoles.includes(r))) {
+        delete filtered[name];
+      }
+    }
+  }
+  return filtered;
 }
 
 async function walkRoutes(dir: string): Promise<string[]> {
@@ -266,7 +285,7 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
   const config = await loadLumoraConfig(configOrPath);
   const events = new LumoraEventEmitter<LumoraEventMap>();
   const realtime = new LumoraRealtimeHub(config.auth.mode === "jwt" ? config.auth.secret : undefined);
-  const database = new LumoraDatabase(config.database, events);
+  const database = new LumoraDatabase(config.database, events, config.multiTenancy);
   const resources: DefineResourceResult[] = config.resources
     ? config.resources
     : config.routes
@@ -278,7 +297,11 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
   const logger = new LumoraLogger(config.logging.level);
 
   app.use("*", async (c, next) => {
-    const { origin, methods, headers, credentials } = config.cors;
+    if (config.cors.passthrough) {
+      await next();
+      return;
+    }
+    const { origin, methods, headers, credentials, exposeHeaders, maxAge } = config.cors;
     const requestOrigin = c.req.header("origin") ?? "";
     const allowed = origin === "*"
       || (Array.isArray(origin) ? origin.includes(requestOrigin) : requestOrigin === origin);
@@ -288,13 +311,38 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
     c.header("Access-Control-Allow-Methods", methods.join(", "));
     c.header("Access-Control-Allow-Headers", headers.join(", "));
     if (credentials) c.header("Access-Control-Allow-Credentials", "true");
+    if (exposeHeaders && exposeHeaders.length > 0) {
+      c.header("Access-Control-Expose-Headers", exposeHeaders.join(", "));
+    }
+    if (maxAge !== undefined) {
+      c.header("Access-Control-Max-Age", String(maxAge));
+    }
     if (c.req.method === "OPTIONS") return c.body(null, 204);
     await next();
   });
 
+  if (config.auth.protectedPaths && config.auth.protectedPaths.length > 0) {
+    for (const p of config.auth.protectedPaths) {
+      app.use(p, async (c, next) => {
+        const auth = await authorize(config, { kind: "resource", resource: "_root", fields: {} }, c).catch((err) => {
+          logger.event("auth", String(err));
+          return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
+        });
+        if (auth instanceof Response) return auth;
+        await next();
+      });
+    }
+  }
+
   app.use("*", async (c, next) => {
     const requestId = crypto.randomUUID();
     c.set("requestId", requestId);
+    c.set("lumoraJson", (data: unknown, status = 200) => {
+      return c.json({ ok: true, data }, status as any);
+    });
+    c.set("lumoraError", (message: string, status = 400) => {
+      return c.json({ ok: false, error: message }, status as any);
+    });
     const start = Date.now();
     await next();
     logger.request(c.req.method, new URL(c.req.url).pathname, c.res.status, Date.now() - start, requestId);
@@ -302,6 +350,7 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
 
   await database.connect();
   await database.ensureAuditTable();
+  await database.ensureCronLogTable();
 
   // Migration engine — mode-aware (auto in dev, strict in prod, off in test)
   const migrationEngine = new LumoraMigrationEngine(database, config, logger);
@@ -371,6 +420,8 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
           })
         );
       }
+      const userRoles = auth?.roles ?? (auth?.claims?.roles as string[] | undefined) ?? [];
+      items = items.map(record => filterFieldsByRole(record, resource, userRoles));
       return c.json({ ok: true, data: items, total: result.total, page: result.page, pageSize: result.pageSize });
     });
 
@@ -407,6 +458,7 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
     // LS-4: Bulk create endpoint
     if (resource.bulk !== undefined || true) { // always mounted; resource.bulk config controls transaction behaviour
       app.post(`${resourceBase}/bulk`, async (c) => {
+        if (resource.readOnly) return c.json({ ok: false, error: "Method Not Allowed" }, 405);
         const auth = await authorize(config, resource, c).catch((err) => {
           logger.event("auth", String(err));
           return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
@@ -455,11 +507,14 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
           }
           return result;
         });
-        return c.json({ ok: true, results });
+        const userRoles = auth?.roles ?? (auth?.claims?.roles as string[] | undefined) ?? [];
+        const filteredResults = results.map(r => r.data ? { ...r, data: filterFieldsByRole(r.data, resource, userRoles) } : r);
+        return c.json({ ok: true, results: filteredResults });
       });
     }
 
     app.post(resourceBase, async (c) => {
+      if (resource.readOnly) return c.json({ ok: false, error: "Method Not Allowed" }, 405);
       const auth = await authorize(config, resource, c).catch((err) => {
         logger.event("auth", String(err));
         return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
@@ -509,11 +564,13 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       // LS-6: namespaced per-resource event for targeted subscription
       events.emit(`resource:${resource.resource}:afterCreate`, eventPayload);
       realtime.publish(eventPayload);
-      return c.json({ ok: true, data: record }, 201);
+      const userRoles = auth?.roles ?? (auth?.claims?.roles as string[] | undefined) ?? [];
+      return c.json({ ok: true, data: filterFieldsByRole(record, resource, userRoles) }, 201);
     });
 
 
     const updateHandler = async (c: Context<{ Variables: AppVariables }>) => {
+      if (resource.readOnly || resource.immutable) return c.json({ ok: false, error: "Method Not Allowed" }, 405);
       const method = c.req.method as "PUT" | "PATCH";
       const auth = await authorize(config, resource, c).catch((err) => {
         logger.event("auth", String(err));
@@ -547,7 +604,8 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       // LS-6: namespaced per-resource event
       events.emit(`resource:${resource.resource}:afterUpdate`, eventPayload);
       realtime.publish(eventPayload);
-      return c.json({ ok: true, data: record });
+      const userRoles = auth?.roles ?? (auth?.claims?.roles as string[] | undefined) ?? [];
+      return c.json({ ok: true, data: filterFieldsByRole(record, resource, userRoles) });
     };
 
     const updateMethod = resource.updateMethod ?? "both";
@@ -559,6 +617,7 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
     }
 
     app.delete(`${resourceBase}/:id`, async (c) => {
+      if (resource.readOnly || resource.immutable) return c.json({ ok: false, error: "Method Not Allowed" }, 405);
       const auth = await authorize(config, resource, c).catch((err) => {
         logger.event("auth", String(err));
         return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
@@ -586,7 +645,8 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       // LS-6: namespaced per-resource event
       events.emit(`resource:${resource.resource}:afterDelete`, eventPayload);
       realtime.publish(eventPayload);
-      return c.json({ ok: true, data: record });
+      const userRoles = auth?.roles ?? (auth?.claims?.roles as string[] | undefined) ?? [];
+      return c.json({ ok: true, data: filterFieldsByRole(record, resource, userRoles) });
     });
 
     app.get(`${resourceBase}/${config.realtime.sseSuffix}`, (c) => {
@@ -643,7 +703,8 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       const includes = includeParam ? includeParam.split(",").map((s) => s.trim()).filter(Boolean) : [];
       if (resource.computed) record = await resolveComputed(record, resource, auth, database);
       if (includes.length > 0) record = await resolveIncludes(record, resource, includes, resources, database);
-      return c.json({ ok: true, data: record });
+      const userRoles = auth?.roles ?? (auth?.claims?.roles as string[] | undefined) ?? [];
+      return c.json({ ok: true, data: filterFieldsByRole(record, resource, userRoles) });
     });
   }
 
@@ -672,13 +733,39 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
     ? startScheduler(config.schedule, { database, logger })
     : undefined;
 
+  const shutdownHooks: Array<() => Promise<void> | void> = [];
+
   const instance: LumoraInstance = {
     get apiPrefix() {
       return apiPrefix(config);
     },
-    mountModule(path, router) {
+    mountModule(path, router, options) {
+      if (options?.protected) {
+        app.use(`${apiPrefix(config)}${path}/*`, async (c, next) => {
+          const auth = await authorize(config, { kind: "resource", resource: "_module", fields: {} }, c).catch((err) => {
+            logger.event("auth", String(err));
+            return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 401, headers: { "Content-Type": "application/json" } });
+          });
+          if (auth instanceof Response) return auth;
+          await next();
+        });
+      }
       app.route(`${apiPrefix(config)}${path}`, router);
       return this;
+    },
+    shutdown: async () => {
+      logger.event("shutdown", "Initiating graceful shutdown...");
+      for (const hook of shutdownHooks) {
+        try {
+          await hook();
+        } catch (err) {
+          logger.error("shutdown:hook", err, "");
+        }
+      }
+      await instance.close();
+    },
+    onShutdown: (callback) => {
+      shutdownHooks.push(callback);
     },
     app,
     fetch: (request, server) => app.fetch(request, { server } as never),
@@ -708,23 +795,33 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
   return instance;
 }
 
-export async function logAudit(db: LumoraDatabase, opts: AuditLogOpts): Promise<void> {
-  try {
-    await db.writeAuditLog({
-      resource: opts.entityType,
-      action: opts.action as "create" | "update" | "delete",
-      record_id: opts.entityId,
-      actor_subject: opts.userId,
-      actor_strategy: "procedural",
-      old_value: JSON.stringify(opts.details ?? {}),
-      new_value: JSON.stringify(opts.details ?? {}),
-      request_id: crypto.randomUUID(),
-      request_path: opts.entityType,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (err) {
-    // Audit failures must never propagate
-    console.error("[lumora:audit] failed:", (err as Error).message);
+export function logAudit(db: LumoraDatabase, opts: AuditLogOpts, options?: { strict?: boolean }): Promise<void> | void {
+  const write = async () => {
+    try {
+      await db.writeAuditLog({
+        resource: opts.entityType,
+        action: opts.action as "create" | "update" | "delete",
+        record_id: opts.entityId,
+        actor_subject: opts.userId,
+        actor_strategy: "procedural",
+        old_value: JSON.stringify(opts.details ?? {}),
+        new_value: JSON.stringify(opts.details ?? {}),
+        request_id: crypto.randomUUID(),
+        request_path: opts.entityType,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err) {
+      if (options?.strict) throw err;
+      console.error("[lumora:audit] failed:", (err as Error).message);
+    }
+  };
+
+  if (options?.strict) {
+    return write();
+  } else {
+    setTimeout(() => {
+      write().catch(() => {});
+    }, 0);
   }
 }
 
@@ -734,6 +831,6 @@ export function createModuleContext(instance: LumoraInstance): LumoraModuleConte
     auth: instance.config.auth,
     ai: instance.ai,
     realtime: instance.realtime,
-    logAudit: (opts) => logAudit(instance.database, opts),
+    logAudit: (opts, options) => logAudit(instance.database, opts, options),
   };
 }

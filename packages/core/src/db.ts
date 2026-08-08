@@ -166,12 +166,19 @@ function buildTransactionPayload(resource: DefineResourceResult, action: Transac
   };
 }
 
+function buildSelectClause(client: DbClient, resource: DefineResourceResult): string {
+  const fields = ["id", "created_at", "updated_at", ...Object.keys(resource.fields)];
+  return fields.map(f => quoteIdentifier(client, f)).join(", ");
+}
+
 export class LumoraDatabase {
   readonly sql: SQL;
+  tenantId?: string;
 
   constructor(
-    private readonly config: LumoraDatabaseConfig,
-    private readonly events: TypedEventEmitter<LumoraEventMap>
+    public readonly config: LumoraDatabaseConfig,
+    private readonly events: TypedEventEmitter<LumoraEventMap>,
+    public readonly multiTenancy?: { enabled: boolean; tenantIdField: string }
   ) {
     if (config.client === "postgresql") {
       const pgSchema = config.schema && config.schema !== "public" ? config.schema : undefined;
@@ -194,6 +201,12 @@ export class LumoraDatabase {
 
   async close(): Promise<void> {
     await this.sql.close();
+  }
+
+  scoped(tenantId: string): LumoraDatabase {
+    const clone = Object.create(this) as LumoraDatabase;
+    clone.tenantId = tenantId;
+    return clone;
   }
 
   async ensureResource(resource: DefineResourceResult): Promise<void> {
@@ -279,7 +292,11 @@ export class LumoraDatabase {
       schemaPrefix = `"${this.config.schema}".`;
     }
     const table = schemaPrefix + quoteIdentifier(this.config.client, resource.table ?? resource.resource);
-    const query = `SELECT * FROM ${table} WHERE id = ${escapeValue(this.config.client, id)} LIMIT 1`;
+    const tenantClause = (this.multiTenancy?.enabled && this.tenantId)
+      ? ` AND ${quoteIdentifier(this.config.client, this.multiTenancy.tenantIdField ?? "tenant_id")} = ${escapeValue(this.config.client, this.tenantId)}`
+      : "";
+    const select = buildSelectClause(this.config.client, resource);
+    const query = `SELECT ${select} FROM ${table} WHERE id = ${escapeValue(this.config.client, id)}${tenantClause} LIMIT 1`;
     const rows = await this.sql.unsafe<Record<string, unknown>[]>(query);
     return rows[0] ? normalizeRecord(rows[0], resource) : null;
   }
@@ -294,6 +311,11 @@ export class LumoraDatabase {
       schemaPrefix = `"${this.config.schema}".`;
     }
     const table = schemaPrefix + quoteIdentifier(this.config.client, resource.table ?? resource.resource);
+
+    if (this.multiTenancy?.enabled && this.tenantId) {
+      input = { ...input, [this.multiTenancy.tenantIdField ?? "tenant_id"]: this.tenantId };
+    }
+
     const now = new Date().toISOString();
     const id = crypto.randomUUID();
     const record = {
@@ -343,7 +365,12 @@ export class LumoraDatabase {
       .map(([key, value]) => `${quoteIdentifier(this.config.client, key)} = ${escapeValue(this.config.client, value, resource.fields[key])}`)
       .concat(`${quoteIdentifier(this.config.client, "updated_at")} = ${escapeValue(this.config.client, updatedAt)}`)
       .join(", ");
-    const query = `UPDATE ${table} SET ${assignments} WHERE id = ${escapeValue(this.config.client, id)}`;
+    
+    const tenantClause = (this.multiTenancy?.enabled && this.tenantId)
+      ? ` AND ${quoteIdentifier(this.config.client, this.multiTenancy.tenantIdField ?? "tenant_id")} = ${escapeValue(this.config.client, this.tenantId)}`
+      : "";
+
+    const query = `UPDATE ${table} SET ${assignments} WHERE id = ${escapeValue(this.config.client, id)}${tenantClause}`;
     const tx = buildTransactionPayload(resource, "update", query);
     this.events.emit("db:transaction:before", tx);
 
@@ -374,7 +401,10 @@ export class LumoraDatabase {
       schemaPrefix = `"${this.config.schema}".`;
     }
     const table = schemaPrefix + quoteIdentifier(this.config.client, resource.table ?? resource.resource);
-    const query = `DELETE FROM ${table} WHERE id = ${escapeValue(this.config.client, id)}`;
+    const tenantClause = (this.multiTenancy?.enabled && this.tenantId)
+      ? ` AND ${quoteIdentifier(this.config.client, this.multiTenancy.tenantIdField ?? "tenant_id")} = ${escapeValue(this.config.client, this.tenantId)}`
+      : "";
+    const query = `DELETE FROM ${table} WHERE id = ${escapeValue(this.config.client, id)}${tenantClause}`;
     const tx = buildTransactionPayload(resource, "delete", query);
     this.events.emit("db:transaction:before", tx);
 
@@ -432,6 +462,52 @@ export class LumoraDatabase {
     }
   }
 
+  async ensureCronLogTable(): Promise<void> {
+    let schemaPrefix = "";
+    if (this.config.client === "postgresql" && this.config.schema && this.config.schema !== "public") {
+      schemaPrefix = `"${this.config.schema}".`;
+    }
+    const table = this.config.client === "postgresql" ? `${schemaPrefix}"lumora_cron_log"` : "`lumora_cron_log`";
+    if (this.config.client === "postgresql") {
+      await this.sql.unsafe(`
+        CREATE TABLE IF NOT EXISTS ${table} (
+          id SERIAL PRIMARY KEY,
+          task_name TEXT NOT NULL,
+          executed_at TIMESTAMPTZ NOT NULL,
+          duration_ms INTEGER NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('success', 'failed')),
+          error_message TEXT
+        );
+      `);
+    } else {
+      await this.sql.unsafe(`
+        CREATE TABLE IF NOT EXISTS ${table} (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          task_name TEXT NOT NULL,
+          executed_at TEXT NOT NULL,
+          duration_ms INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          error_message TEXT
+        );
+      `);
+    }
+  }
+
+  async writeCronLog(name: string, durationMs: number, error?: string): Promise<void> {
+    let schemaPrefix = "";
+    if (this.config.client === "postgresql" && this.config.schema && this.config.schema !== "public") {
+      schemaPrefix = `"${this.config.schema}".`;
+    }
+    const table = this.config.client === "postgresql" ? `${schemaPrefix}"lumora_cron_log"` : "`lumora_cron_log`";
+    const now = new Date().toISOString();
+    const status = error ? "failed" : "success";
+    const errorMsg = error ? escapeValue(this.config.client, String(error)) : "NULL";
+    await this.sql.unsafe(`
+      INSERT INTO ${table} (task_name, executed_at, duration_ms, status, error_message)
+      VALUES (${escapeValue(this.config.client, name)}, '${now}', ${durationMs}, '${status}', ${errorMsg})
+    `);
+  }
+
   async writeAuditLog(entry: Omit<AuditLogRecord, "id">): Promise<void> {
     const id = crypto.randomUUID();
     const columns = Object.keys({ id, ...entry }).map(k => quoteIdentifier(this.config.client, k)).join(", ");
@@ -459,7 +535,11 @@ export class LumoraDatabase {
       schemaPrefix = `"${this.config.schema}".`;
     }
     const table = schemaPrefix + quoteIdentifier(this.config.client, resource.table ?? resource.resource);
-    const query = `SELECT * FROM ${table} WHERE ${quoteIdentifier(this.config.client, field)} = ${escapeValue(this.config.client, value)} LIMIT 1`;
+    const tenantClause = (this.multiTenancy?.enabled && this.tenantId)
+      ? ` AND ${quoteIdentifier(this.config.client, this.multiTenancy.tenantIdField ?? "tenant_id")} = ${escapeValue(this.config.client, this.tenantId)}`
+      : "";
+    const select = buildSelectClause(this.config.client, resource);
+    const query = `SELECT ${select} FROM ${table} WHERE ${quoteIdentifier(this.config.client, field)} = ${escapeValue(this.config.client, value)}${tenantClause} LIMIT 1`;
     const rows = await this.sql.unsafe<Record<string, unknown>[]>(query);
     return rows[0] ? normalizeRecord(rows[0], resource) : null;
   }
@@ -475,7 +555,11 @@ export class LumoraDatabase {
       schemaPrefix = `"${this.config.schema}".`;
     }
     const table = schemaPrefix + quoteIdentifier(this.config.client, resource.table ?? resource.resource);
-    const query = `SELECT * FROM ${table} WHERE ${quoteIdentifier(this.config.client, field)} = ${escapeValue(this.config.client, value)} ORDER BY updated_at DESC LIMIT ${limit}`;
+    const tenantClause = (this.multiTenancy?.enabled && this.tenantId)
+      ? ` AND ${quoteIdentifier(this.config.client, this.multiTenancy.tenantIdField ?? "tenant_id")} = ${escapeValue(this.config.client, this.tenantId)}`
+      : "";
+    const select = buildSelectClause(this.config.client, resource);
+    const query = `SELECT ${select} FROM ${table} WHERE ${quoteIdentifier(this.config.client, field)} = ${escapeValue(this.config.client, value)}${tenantClause} ORDER BY updated_at DESC LIMIT ${limit}`;
     const rows = await this.sql.unsafe<Record<string, unknown>[]>(query);
     return rows.map((row) => normalizeRecord(row, resource));
   }
@@ -487,6 +571,11 @@ export class LumoraDatabase {
     audit?: RequestAudit
   ): Promise<BulkResult[]> {
     if (inputs.length === 0) return [];
+
+    if (this.multiTenancy?.enabled && this.tenantId) {
+      const tenantField = this.multiTenancy.tenantIdField ?? "tenant_id";
+      inputs = inputs.map(i => ({ ...i, [tenantField]: this.tenantId }));
+    }
 
     let schemaPrefix = "";
     if (this.config.client === "postgresql" && this.config.schema && this.config.schema !== "public") {

@@ -38,12 +38,17 @@ There are no other active framework packages in the repo anymore.
 - `defineLumoraConfig(...)`
 - `defineResource(...)`
 - `initLumora(configOrPath)`
-- generated CRUD for DB-backed resources
+- generated CRUD for DB-backed resources with relational joins
 - SSE and WebSocket endpoints per resource
 - typed event emitter for lifecycle, CRUD, DB transaction, and realtime message events
-- static token and JWT auth modes
+- static token and JWT auth modes, with scope/role-based field level redacting (`visibleTo`)
+- `readOnly` and `immutable` flags on resources
+- SQL projection configurations (`excludeFields`)
+- built-in multi-tenancy configurations (`tenantIdField`)
+- rate-limiting out of the box (`memory` and `Postgres` stores)
+- declarative scheduling system with `lumora_cron_log`
 - dev-mode OpenAPI JSON and simple docs UI
-- file-based SQL migration engine with automatic dev-apply
+- file-based SQL migration engine with strict forward-only verification and auto-apply modes
 - interactive init wizard
 
 ## What the starter app proves

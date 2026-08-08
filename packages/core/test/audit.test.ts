@@ -148,7 +148,7 @@ describe("Audit Trail", () => {
       entityId: "inv_123",
       userId: "user_456",
       details: { amount: 100 }
-    });
+    }, { strict: true });
     
     const rows = await queryAuditLogs(dbPath);
     expect(rows.length).toBe(1);

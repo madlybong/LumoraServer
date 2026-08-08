@@ -74,11 +74,23 @@ export function startScheduler(
     if (typeof cronFn === "function") {
       const job = cronFn(task.cron, async () => {
         ctx.logger.event("scheduler:run", `task "${task.name}" running`);
+        const start = Date.now();
         try {
           await runWithRetry(task, ctx);
+          const duration = Date.now() - start;
           ctx.logger.event("scheduler:done", `task "${task.name}" completed`);
+          if (task.log) await ctx.database.writeCronLog(task.name, duration).catch(() => {});
         } catch (err) {
+          const duration = Date.now() - start;
           ctx.logger.error(`scheduler:${task.name}:failed`, err);
+          if (task.onError) {
+            try {
+              await task.onError(err, ctx);
+            } catch (hookErr) {
+              ctx.logger.error(`scheduler:${task.name}:onError`, hookErr);
+            }
+          }
+          if (task.log) await ctx.database.writeCronLog(task.name, duration, String(err)).catch(() => {});
         }
       });
       // Bun.cron returns an object with a stop() method or unref()
