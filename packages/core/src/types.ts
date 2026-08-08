@@ -25,6 +25,7 @@ export interface ResourceField {
   readOnly?: boolean;
   unique?: boolean;
   indexed?: boolean;
+  visibleTo?: string[];
   fileOptions?: FileFieldOptions;  // only used when type is "file" or "file[]"
 }
 
@@ -149,6 +150,8 @@ export interface ResourceSchema<TFields extends ResourceFields = ResourceFields>
   meta?: ResourceMeta;
   permissions?: ResourcePermissions;
   audit?: boolean;
+  readOnly?: boolean;
+  immutable?: boolean;
   // LS-1: computed virtual fields (resolved on read, never stored)
   computed?: ComputedFields;
   // LS-2: relational joins (resolved via ?include= query param)
@@ -164,10 +167,13 @@ export interface DefineResourceResult<TFields extends ResourceFields = ResourceF
   kind: "resource";
 }
 
-export type LumoraAuthConfig =
+export type LumoraAuthConfig = {
+  protectedPaths?: string[];
+} & (
   | { mode: "disabled" }
   | { mode: "static"; token: string; header?: string }
-  | { mode: "jwt"; secret: string; issuer?: string; audience?: string };
+  | { mode: "jwt"; secret: string; issuer?: string; audience?: string; clockSkewSeconds?: number }
+);
 
 export type LumoraDatabaseConfig =
   | { client: "sqlite"; url: string }
@@ -190,7 +196,9 @@ export interface LumoraScheduledTask {
   name: string;
   // Standard 5-field cron expression (e.g. "0/5 * * * *" for every 5 minutes)
   cron: string;
-  handler: (ctx: SchedulerContext) => Promise<void> | void;
+  log?: boolean;
+  handler: (ctx: SchedulerContext) => Promise<void>;
+  onError?: (err: unknown, ctx: SchedulerContext) => Promise<void> | void;
   /** Max retry attempts on handler failure (default: 0) */
   retries?: number;
   /** Delay between retries (e.g. "30s", "2m") — supports exponential backoff */
@@ -211,6 +219,8 @@ export interface LumoraMigrationsConfig {
    * "off"    — disable migration engine entirely (default in test)
    */
   mode?: "auto" | "strict" | "off";
+  allowDowngrade?: boolean;
+  blockDestructive?: boolean;
 }
 
 export interface LumoraConfig {
@@ -253,6 +263,15 @@ export interface LumoraConfig {
     methods?: string[];
     headers?: string[];
     credentials?: boolean;
+    allowHeaders?: string[];
+    allowMethods?: string[];
+    exposeHeaders?: string[];
+    maxAge?: number;
+    passthrough?: boolean;
+  };
+  multiTenancy?: {
+    enabled?: boolean;
+    tenantIdField?: string;
   };
   // LS-3: file upload configuration
   upload?: {
@@ -263,6 +282,12 @@ export interface LumoraConfig {
   schedule?: LumoraScheduledTask[];
   // Migration system config
   migrations?: LumoraMigrationsConfig;
+  rateLimit?: {
+    enabled?: boolean;
+    windowMs?: number;
+    max?: number;
+    store?: "memory" | "database";
+  };
 }
 
 export interface ResolvedLumoraConfig extends LumoraConfig {
@@ -287,11 +312,26 @@ export interface ResolvedLumoraConfig extends LumoraConfig {
     methods: string[];
     headers: string[];
     credentials: boolean;
+    exposeHeaders?: string[];
+    maxAge?: number;
+    passthrough?: boolean;
+  };
+  multiTenancy?: {
+    enabled: boolean;
+    tenantIdField: string;
   };
   migrations: {
     /** Absolute resolved path to migrations directory */
     dir: string;
     mode: "auto" | "strict" | "off";
+    allowDowngrade?: boolean;
+    blockDestructive?: boolean;
+  };
+  rateLimit: {
+    enabled: boolean;
+    windowMs: number;
+    max: number;
+    store: "memory" | "database";
   };
 }
 
@@ -389,7 +429,9 @@ export interface LumoraInstance {
   /** All loaded resource definitions (inline or file-based). */
   resources: DefineResourceResult[];
   readonly apiPrefix: string;
-  mountModule(path: string, router: Hono<any>): this;
+  mountModule(path: string, router: Hono<any>, options?: { protected?: boolean }): this;
+  shutdown(): Promise<void>;
+  onShutdown(callback: () => Promise<void> | void): void;
   close(): Promise<void>;
 }
 
@@ -407,12 +449,15 @@ export interface LumoraModuleContext {
   auth: LumoraAuthConfig;
   ai?: LumoraAIService;
   realtime?: LumoraRealtime;
-  logAudit: (opts: AuditLogOpts) => Promise<void>;
+  logAudit: (opts: AuditLogOpts, options?: { strict?: boolean }) => Promise<void> | void;
 }
 
 export type LumoraHonoVariables = {
   user: Record<string, unknown>;
   userRole: string;
+  requestId: string;
+  lumoraJson: <T>(data: T, status?: number) => Response;
+  lumoraError: (message: string, status?: number) => Response;
 };
 
 export interface TypedEventEmitter<TMap extends object> {

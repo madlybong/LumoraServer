@@ -57,13 +57,38 @@ export function resolveLumoraConfig(config: LumoraConfig, rootDir: string): Reso
     },
     cors: {
       origin: config.cors?.origin ?? (config.mode === "development" ? "*" : ""),
-      methods: config.cors?.methods ?? ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      headers: config.cors?.headers ?? ["Content-Type", "Authorization"],
-      credentials: config.cors?.credentials ?? false
+      methods: [
+        ...new Set([
+          ...(config.cors?.methods ?? ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]),
+          ...(config.cors?.allowMethods ?? [])
+        ])
+      ],
+      headers: [
+        ...new Set([
+          ...(config.cors?.headers ?? ["Content-Type", "Authorization"]),
+          ...(config.cors?.allowHeaders ?? [])
+        ])
+      ],
+      credentials: config.cors?.credentials ?? false,
+      exposeHeaders: config.cors?.exposeHeaders,
+      maxAge: config.cors?.maxAge,
+      passthrough: config.cors?.passthrough
+    },
+    rateLimit: {
+      enabled: config.rateLimit?.enabled ?? false,
+      max: config.rateLimit?.max ?? 100,
+      windowMs: config.rateLimit?.windowMs ?? 60000,
+      store: config.rateLimit?.store ?? "memory"
+    },
+    multiTenancy: {
+      enabled: config.multiTenancy?.enabled ?? false,
+      tenantIdField: config.multiTenancy?.tenantIdField ?? "tenant_id"
     },
     migrations: {
       dir: path.resolve(rootDir, config.migrations?.dir ?? "migrations"),
-      mode: migrationMode
+      mode: migrationMode,
+      allowDowngrade: config.migrations?.allowDowngrade ?? false,
+      blockDestructive: config.migrations?.blockDestructive ?? false
     }
   };
 }

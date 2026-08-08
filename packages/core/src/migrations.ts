@@ -74,6 +74,16 @@ export class LumoraMigrationEngine {
     const applied = await this.db.getAppliedMigrations();
     const appliedNames = new Set(applied.map((r) => r.name));
     const files = await this.discoverFiles();
+    const fileStems = new Set(files.map((f) => path.basename(f, ".sql")));
+
+    if (!this.config.migrations.allowDowngrade) {
+      for (const appliedMigration of applied) {
+        if (!fileStems.has(appliedMigration.name)) {
+          throw new Error(`[lumora] Forward-only guard failed: Migration "${appliedMigration.name}" was applied to the database, but is missing from the local filesystem. Downgrades are blocked by config.migrations.allowDowngrade.`);
+        }
+      }
+    }
+
     const pending = files
       .map((f) => path.basename(f, ".sql"))
       .filter((stem) => !appliedNames.has(stem));
@@ -101,16 +111,20 @@ export class LumoraMigrationEngine {
         const content = await readFile(file, "utf8");
         const checksum = sha256(content);
         if (checksum !== existing.checksum) {
-          this.logger?.event(
-            "migrate:warn",
-            `checksum drift on already-applied migration "${stem}" — file may have been edited after apply`
-          );
+          throw new Error(`[lumora] Migration "${stem}" checksum mismatch (expected ${existing.checksum}, got ${checksum}). Editing applied migrations is prohibited.`);
         }
         continue;
       }
 
       const content = await readFile(file, "utf8");
       const checksum = sha256(content);
+
+      if (this.config.migrations.blockDestructive) {
+        const u = content.toUpperCase();
+        if (u.includes("DROP TABLE") || u.includes("DROP COLUMN") || u.includes("DELETE FROM")) {
+          throw new Error(`[lumora] Destructive operation detected in "${stem}". This is blocked by config.migrations.blockDestructive.`);
+        }
+      }
 
       if (opts.dryRun) {
         results.push({ name: stem, success: true, dryRun: true, sql: content });

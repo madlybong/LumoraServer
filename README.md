@@ -96,6 +96,16 @@ export default defineLumoraConfig({
   schedule: [
     { name: "daily-report", cron: "0 8 * * *", handler: async (ctx) => { /* ... */ } },
   ],
+  rateLimit: {
+    enabled: true,
+    max: 100,
+    windowMs: 60000,
+    store: "memory"
+  },
+  multiTenancy: {
+    enabled: true,
+    tenantIdField: "tenant_id"
+  }
 });
 ```
 
@@ -110,6 +120,8 @@ export default defineResource({
     price:    { type: "number",  required: true, filterable: true },
     image:    { type: "file",   accept: ["image/*"], maxSize: "10MB" },
     category_id: { type: "string", filterable: true },
+    internal_notes: { type: "string", visibleTo: ["admin"] },
+    createdAt: { type: "string", readOnly: true },
   },
   computed: {
     display_price: { type: "string", resolve: async (r) => `$${r.price}` },

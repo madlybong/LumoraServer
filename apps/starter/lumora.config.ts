@@ -10,4 +10,20 @@ export default defineLumoraConfig({
   migrations: { dir: "./apps/starter/migrations/sqlite" },
   docs: { enabled: true },
   cors: { origin: "*" },
+  rateLimit: {
+    enabled: true,
+    max: 100,
+    windowMs: 60000,
+    store: "memory"
+  },
+  schedule: [
+    {
+      name: "Cleanup logs",
+      cron: "0 0 * * *",
+      log: true,
+      handler: async (ctx) => {
+        console.log("Running scheduled cleanup task!");
+      }
+    }
+  ]
 });

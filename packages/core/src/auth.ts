@@ -7,7 +7,7 @@ function base64UrlDecode(input: string): string {
   return Buffer.from(`${normalized}${pad}`, "base64").toString("utf8");
 }
 
-export async function verifyJwtToken(token: string, secret: string): Promise<Record<string, unknown>> {
+export async function verifyJwtToken(token: string, secret: string, clockSkewSeconds = 0): Promise<Record<string, unknown>> {
   const [headerPart, payloadPart, signaturePart] = token.split(".");
   if (!headerPart || !payloadPart || !signaturePart) {
     throw new Error("Malformed JWT token.");
@@ -30,15 +30,28 @@ export async function verifyJwtToken(token: string, secret: string): Promise<Rec
 
   const claims = JSON.parse(base64UrlDecode(payloadPart)) as Record<string, unknown>;
 
-  if (typeof claims.exp === "number" && claims.exp < Math.floor(Date.now() / 1000)) {
+  if (typeof claims.exp === "number" && claims.exp < Math.floor(Date.now() / 1000) - clockSkewSeconds) {
     throw new Error("JWT token has expired.");
   }
 
   return claims;
 }
 
+export async function verifyLumoraJwt(
+  token: string,
+  secret: string,
+  clockSkewSeconds = 0
+): Promise<{ claims: Record<string, unknown> } | null> {
+  try {
+    const claims = await verifyJwtToken(token, secret, clockSkewSeconds);
+    return { claims };
+  } catch (err) {
+    return null;
+  }
+}
+
 async function verifyJwt(token: string, config: Extract<LumoraAuthConfig, { mode: "jwt" }>): Promise<LumoraAuthResult> {
-  const claims = await verifyJwtToken(token, config.secret);
+  const claims = await verifyJwtToken(token, config.secret, config.clockSkewSeconds);
 
   if (config.issuer && claims.iss !== config.issuer) {
     throw new Error("Unexpected JWT issuer.");
@@ -60,6 +73,12 @@ async function verifyJwt(token: string, config: Extract<LumoraAuthConfig, { mode
   };
 }
 
+/**
+ * Resolves authentication from a request context based on the provided configuration.
+ *
+ * Security Note: When using JWT mode, this function explicitly enforces the `exp` (expiration)
+ * claim on every code path. If the token is expired, this function throws an error.
+ */
 export async function resolveAuthFromContext(
   c: Context,
   auth: LumoraAuthConfig

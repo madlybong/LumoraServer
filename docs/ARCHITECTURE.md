@@ -127,6 +127,26 @@ Docs are generated from resolved config and discovered resource definitions. The
 
 Administrator UI is not implemented yet. Current resource metadata and config fields only reserve the extension points needed for future attachment.
 
+## Rate Limiting
+
+Lumora v0.8.0 introduced a robust API rate limiting subsystem:
+
+- Controlled via `rateLimit` config block (`enabled`, `windowMs`, `max`, `store`).
+- Includes a pluggable `RateLimitStore` interface.
+- Built-in stores include `"memory"` for single-instance or development environments and `"database"` (currently PostgreSQL only via `lumora_rate_limits` table) for horizontal scaling.
+- Can be disabled/overridden per resource block.
+
+## Task Scheduling (Cron)
+
+Lumora provides a declarative scheduling framework for background tasks:
+
+- Configured directly inside `lumora.config.ts` via the `schedule` array.
+- Uses `Bun.cron` under the hood.
+- A centralized internal execution context injects database access (`ctx.db`), logging (`ctx.log`), and `ctx.error` handling.
+- When `log: true` is configured, task runs automatically write execution records (start, end, error trace) into a dynamically generated `lumora_cron_log` table.
+
+Migrating schema, tracking cron executions, and scoping tenant identifiers form the bedrock of the 0.8 upgrade abstractions.
+
 ## Migration model
 
 Lumora ships a file-based, mode-aware migration engine. No ORM, no migration DSL — plain SQL files that are version-tracked in a `_migrations` ledger table.
