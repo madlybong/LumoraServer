@@ -1,11 +1,9 @@
-import type { LumoraAuthResult, DefineResourceResult } from "./types";
+import type { LumoraAuthResult, DefineResourceResult, FilterOperator } from "./types";
 import type { LumoraDatabase } from "./db";
 
 // ---------------------------------------------------------------------------
 // LS-11: Structured Query Interface
 // ---------------------------------------------------------------------------
-
-export type FilterOperator = "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "like" | "in";
 
 export interface FilterClause {
   field: string;

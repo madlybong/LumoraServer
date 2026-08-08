@@ -48,6 +48,9 @@ There are no other active framework packages in the repo anymore.
 - rate-limiting out of the box (`memory` and `Postgres` stores)
 - declarative scheduling system with `lumora_cron_log`
 - dev-mode OpenAPI JSON and simple docs UI
+- robust API rate limiting and audit logs
+- advanced filtering operators (gt, lt, in, like)
+- paginated metadata (totalPages, hasNextPage)
 - file-based SQL migration engine with strict forward-only verification and auto-apply modes
 - interactive init wizard
 

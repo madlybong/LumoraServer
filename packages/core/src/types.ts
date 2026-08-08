@@ -5,6 +5,10 @@ import type { LumoraAIConfig, LumoraAIService, LumoraAIChatMessage, AIUsageSumma
 
 export type LumoraMode = "development" | "production" | "test";
 
+export type FilterOperator =
+  | "eq" | "neq" | "gt" | "gte" | "lt" | "lte"
+  | "in" | "nin" | "like" | "isnull" | "notnull";
+
 export type FieldType = "string" | "number" | "boolean" | "json" | "datetime" | "file" | "file[]";
 
 export interface FileFieldOptions {
@@ -63,6 +67,8 @@ export interface BulkResult {
 export interface ResourceExportCsvOptions {
   columns?: string[];   // explicit column list; defaults to all non-hidden schema fields
   filename?: string;    // download filename; defaults to "{resource}-export.csv"
+  /** Maximum rows to export. Defaults to 10_000. */
+  maxRows?: number;
 }
 
 export type ResourceExportConfig = {
@@ -152,6 +158,15 @@ export interface ResourceSchema<TFields extends ResourceFields = ResourceFields>
   audit?: boolean;
   readOnly?: boolean;
   immutable?: boolean;
+  /** Per-resource rate limit override. Merges with global rateLimit config. */
+  rateLimit?: {
+    /** Override max requests per window for this resource. */
+    max?: number;
+    /** Override time window in ms for this resource. */
+    windowMs?: number;
+    /** Set true to completely bypass global rate limiting for this resource. */
+    disabled?: boolean;
+  };
   // LS-1: computed virtual fields (resolved on read, never stored)
   computed?: ComputedFields;
   // LS-2: relational joins (resolved via ?include= query param)
@@ -440,7 +455,13 @@ export interface AuditLogOpts {
   action: string;
   entityType: string;
   entityId: string;
-  /** Safe metadata only. PII (names, phone, diagnosis) must NOT be included. */
+  /** State of record BEFORE the change. Written to old_value in audit log. */
+  before?: Record<string, unknown>;
+  /** State of record AFTER the change. Written to new_value in audit log. */
+  after?: Record<string, unknown>;
+  /** Strategy label written to actor_strategy. Defaults to "procedural". */
+  actorStrategy?: "jwt" | "static" | "procedural" | (string & {});
+  /** @deprecated Use before/after instead. Still accepted for backwards compat — both old_value and new_value will be set to this. */
   details?: Record<string, unknown>;
 }
 

@@ -4,6 +4,22 @@
 
 ---
 
+## [0.8.1] — 2026-08-08
+
+### Added
+
+- implement rate limiting, pagination, batch resolution, audit logging, and filter operators for v0.8.1 (`4bb5446`)
+
+
+---
+
+## [0.8.1] — 2026-08-08
+
+_No conventional commits found in this range._
+
+
+---
+
 ## [0.8.0] — 2026-08-08
 
 ### Added
