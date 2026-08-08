@@ -8,6 +8,15 @@
 
 ### Added
 
+- v0.8.0 release with rate limits, cron jobs, and multi-tenancy (`4502fe8`)
+
+
+---
+
+## [0.8.0] — 2026-08-08
+
+### Added
+
 - implement RFC-01 through RFC-06 features (`1af69c0`)
 - add PostgreSQL adapter via bun:postgres (LUR-001) (`99a0f03`)
 
