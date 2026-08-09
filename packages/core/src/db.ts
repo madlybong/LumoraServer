@@ -11,6 +11,7 @@ import type {
   AuditLogRecord,
   BulkResult
 } from "./types";
+import { LumoraDuplicateError } from "./types";
 
 export interface MigrationRecord {
   id: number;
@@ -23,6 +24,7 @@ interface ListOptions {
   filters: URLSearchParams;
   search?: string;
   sort?: string;
+  cursor?: string;
   page: number;
   pageSize: number;
   // LS-9: scope injection — adds a non-bypassable WHERE clause for store-scoped resources
@@ -122,7 +124,7 @@ function buildWhereClause(client: DbClient, resource: DefineResourceResult, filt
   const filterable = new Set(resource.query?.filterable ?? Object.keys(resource.fields).filter((key) => resource.fields[key]!.filterable));
   const clauses: string[] = [];
 
-  const OPERATOR_RE = /^(.+?)__(gt|gte|lt|lte|neq|in|nin|like|isnull|notnull)$/;
+  const OPERATOR_RE = /^(.+?)__(gt|gte|lt|lte|neq|in|nin|like|ilike|isnull|notnull)$/;
 
   for (const [rawKey, value] of filters.entries()) {
     if (reservedParams.has(rawKey)) continue;
@@ -143,6 +145,13 @@ function buildWhereClause(client: DbClient, resource: DefineResourceResult, filt
       case "lte":     clauses.push(`${col} <= ${escapeValue(client, value, field)}`); break;
       case "neq":     clauses.push(`${col} != ${escapeValue(client, value, field)}`); break;
       case "like":    clauses.push(`${col} LIKE ${escapeValue(client, value)}`);      break;
+      case "ilike":
+        if (client === "postgresql") {
+          clauses.push(`${col} ILIKE ${escapeValue(client, value)}`);
+        } else {
+          clauses.push(`LOWER(${col}) LIKE LOWER(${escapeValue(client, value)})`);
+        }
+        break;
       case "isnull":  clauses.push(`${col} IS NULL`);                                 break;
       case "notnull": clauses.push(`${col} IS NOT NULL`);                             break;
       case "in": {
@@ -181,7 +190,7 @@ function buildSortClause(client: DbClient, resource: DefineResourceResult, sort?
   const field = descending ? sort.slice(1) : sort;
   const sortable = new Set(resource.query?.sortable ?? Object.keys(resource.fields).filter((key) => resource.fields[key]!.sortable));
 
-  if (!sortable.has(field)) {
+  if (field !== "id" && field !== "created_at" && field !== "updated_at" && !sortable.has(field)) {
     return "ORDER BY updated_at DESC";
   }
 
@@ -287,31 +296,44 @@ export class LumoraDatabase {
     }
   }
 
-  async list(resource: DefineResourceResult, options: ListOptions): Promise<{ items: Record<string, unknown>[]; total: number; page: number; pageSize: number }> {
+  async list(resource: DefineResourceResult, options: ListOptions): Promise<{ items: Record<string, unknown>[]; total: number; page: number; pageSize: number; nextCursor?: string }> {
     let schemaPrefix = "";
     if (this.config.client === "postgresql" && this.config.schema && this.config.schema !== "public") {
       schemaPrefix = `"${this.config.schema}".`;
     }
     const table = schemaPrefix + quoteIdentifier(this.config.client, resource.table ?? resource.resource);
     const where = buildWhereClause(this.config.client, resource, options.filters, options.search);
+    if (options.cursor) {
+      const order = options.sort && options.sort.startsWith("-") ? "desc" : "asc";
+      const op = order === "desc" ? "<" : ">";
+      where.push(`id ${op} ${escapeValue(this.config.client, options.cursor)}`);
+    }
     // LS-9: inject scope as a non-bypassable WHERE condition (cannot be overridden by user filters)
     if (options.scope) {
       where.push(`${quoteIdentifier(this.config.client, options.scope.field)} = ${escapeValue(this.config.client, options.scope.value)}`);
     }
     const clause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
     const sort = buildSortClause(this.config.client, resource, options.sort);
-    const offset = (options.page - 1) * options.pageSize;
-    const dataQuery = `SELECT * FROM ${table} ${clause} ${sort} LIMIT ${options.pageSize} OFFSET ${offset}`;
+    
+    let limitOffset = `LIMIT ${options.pageSize}`;
+    if (!options.cursor) {
+      const offset = (options.page - 1) * options.pageSize;
+      limitOffset += ` OFFSET ${offset}`;
+    }
+    
+    const dataQuery = `SELECT * FROM ${table} ${clause} ${sort} ${limitOffset}`;
     const countQuery = `SELECT COUNT(*) as total FROM ${table} ${clause}`;
     const [rows, countRows] = await Promise.all([
       this.sql.unsafe<Record<string, unknown>[]>(dataQuery),
       this.sql.unsafe<Record<string, unknown>[]>(countQuery)
     ]);
+    const items = rows.map((row) => normalizeRecord(row, resource));
     return {
-      items: rows.map((row) => normalizeRecord(row, resource)),
+      items,
       total: Number((countRows[0] as any)?.total ?? 0),
       page: options.page,
-      pageSize: options.pageSize
+      pageSize: options.pageSize,
+      nextCursor: items.length > 0 ? (items[items.length - 1]?.id as string) : undefined
     };
   }
 
@@ -370,6 +392,10 @@ export class LumoraDatabase {
       return normalizeRecord(record, resource);
     } catch (error) {
       this.events.emit("db:transaction:rollback", { ...tx, error: String(error) });
+      const errStr = String(error);
+      if (errStr.includes("UNIQUE constraint failed") || errStr.includes("duplicate key value violates unique constraint") || errStr.includes("Duplicate entry")) {
+        throw new LumoraDuplicateError("Duplicate value for unique field.");
+      }
       throw error;
     }
   }
@@ -416,6 +442,10 @@ export class LumoraDatabase {
       };
     } catch (error) {
       this.events.emit("db:transaction:rollback", { ...tx, error: String(error) });
+      const errStr = String(error);
+      if (errStr.includes("UNIQUE constraint failed") || errStr.includes("duplicate key value violates unique constraint") || errStr.includes("Duplicate entry")) {
+        throw new LumoraDuplicateError("Duplicate value for unique field.");
+      }
       throw error;
     }
   }
@@ -712,6 +742,132 @@ export class LumoraDatabase {
           await this.sql.begin(async (sql) => { await sql.unsafe(query); });
           this.events.emit("db:transaction:after", tx);
           results.push({ success: true, id: record.id as string, data: normalizeRecord(record, resource) });
+        } catch (error) {
+          this.events.emit("db:transaction:rollback", { ...tx, error: String(error) });
+          results.push({ success: false, error: String(error) });
+        }
+      }
+      return results;
+    }
+  }
+
+  async updateBulk(
+    resource: DefineResourceResult,
+    inputs: Record<string, unknown>[],
+    audit?: RequestAudit
+  ): Promise<BulkResult[]> {
+    if (inputs.length === 0) return [];
+
+    let schemaPrefix = "";
+    if (this.config.client === "postgresql" && this.config.schema && this.config.schema !== "public") {
+      schemaPrefix = `"${this.config.schema}".`;
+    }
+    const table = schemaPrefix + quoteIdentifier(this.config.client, resource.table ?? resource.resource);
+    const transactional = resource.bulk?.transactional !== false;
+    const tenantClause = (this.multiTenancy?.enabled && this.tenantId)
+      ? ` AND ${quoteIdentifier(this.config.client, this.multiTenancy.tenantIdField ?? "tenant_id")} = ${escapeValue(this.config.client, this.tenantId)}`
+      : "";
+
+    // Prepare all queries
+    const prepared: { id: string; query: string }[] = inputs.map((input) => {
+      const id = String(input.id);
+      const updatedAt = new Date().toISOString();
+      const assignments = Object.entries(input)
+        .filter(([key]) => key !== "id" && key !== "created_at" && key !== "updated_at")
+        .map(([key, value]) => `${quoteIdentifier(this.config.client, key)} = ${escapeValue(this.config.client, value, resource.fields[key])}`)
+        .concat(`${quoteIdentifier(this.config.client, "updated_at")} = ${escapeValue(this.config.client, updatedAt)}`)
+        .join(", ");
+      
+      const query = `UPDATE ${table} SET ${assignments} WHERE id = ${escapeValue(this.config.client, id)}${tenantClause}`;
+      return { id, query };
+    });
+
+    if (transactional) {
+      const tx = buildTransactionPayload(resource, "update", `BULK UPDATE ${prepared.length} records in ${table}`);
+      this.events.emit("db:transaction:before", tx);
+      try {
+        await this.sql.begin(async (sql) => {
+          for (const { query } of prepared) {
+            await sql.unsafe(query);
+          }
+        });
+        this.events.emit("db:transaction:after", tx);
+        return prepared.map(({ id }) => ({
+          success: true,
+          id,
+          data: { id }
+        }));
+      } catch (error) {
+        this.events.emit("db:transaction:rollback", { ...tx, error: String(error) });
+        return inputs.map(() => ({ success: false, error: String(error) }));
+      }
+    } else {
+      const results: BulkResult[] = [];
+      for (const { id, query } of prepared) {
+        const tx = buildTransactionPayload(resource, "update", query);
+        this.events.emit("db:transaction:before", tx);
+        try {
+          await this.sql.begin(async (sql) => { await sql.unsafe(query); });
+          this.events.emit("db:transaction:after", tx);
+          results.push({ success: true, id, data: { id } });
+        } catch (error) {
+          this.events.emit("db:transaction:rollback", { ...tx, error: String(error) });
+          results.push({ success: false, error: String(error) });
+        }
+      }
+      return results;
+    }
+  }
+
+  async deleteBulk(
+    resource: DefineResourceResult,
+    ids: string[],
+    audit?: RequestAudit
+  ): Promise<BulkResult[]> {
+    if (ids.length === 0) return [];
+
+    let schemaPrefix = "";
+    if (this.config.client === "postgresql" && this.config.schema && this.config.schema !== "public") {
+      schemaPrefix = `"${this.config.schema}".`;
+    }
+    const table = schemaPrefix + quoteIdentifier(this.config.client, resource.table ?? resource.resource);
+    const transactional = resource.bulk?.transactional !== false;
+    const tenantClause = (this.multiTenancy?.enabled && this.tenantId)
+      ? ` AND ${quoteIdentifier(this.config.client, this.multiTenancy.tenantIdField ?? "tenant_id")} = ${escapeValue(this.config.client, this.tenantId)}`
+      : "";
+
+    const prepared = ids.map(id => {
+      return { id, query: `DELETE FROM ${table} WHERE id = ${escapeValue(this.config.client, id)}${tenantClause}` };
+    });
+
+    if (transactional) {
+      const tx = buildTransactionPayload(resource, "delete", `BULK DELETE ${prepared.length} records in ${table}`);
+      this.events.emit("db:transaction:before", tx);
+      try {
+        await this.sql.begin(async (sql) => {
+          for (const { query } of prepared) {
+            await sql.unsafe(query);
+          }
+        });
+        this.events.emit("db:transaction:after", tx);
+        return prepared.map(({ id }) => ({
+          success: true,
+          id,
+          data: { id }
+        }));
+      } catch (error) {
+        this.events.emit("db:transaction:rollback", { ...tx, error: String(error) });
+        return ids.map(() => ({ success: false, error: String(error) }));
+      }
+    } else {
+      const results: BulkResult[] = [];
+      for (const { id, query } of prepared) {
+        const tx = buildTransactionPayload(resource, "delete", query);
+        this.events.emit("db:transaction:before", tx);
+        try {
+          await this.sql.begin(async (sql) => { await sql.unsafe(query); });
+          this.events.emit("db:transaction:after", tx);
+          results.push({ success: true, id, data: { id } });
         } catch (error) {
           this.events.emit("db:transaction:rollback", { ...tx, error: String(error) });
           results.push({ success: false, error: String(error) });

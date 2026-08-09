@@ -4,6 +4,23 @@
 
 ---
 
+## [0.8.2] — 2026-08-09
+
+### Added
+
+- implement rate limiting, pagination, batch resolution, audit logging, and filter operators for v0.8.1 (`4bb5446`)
+
+### Fixed
+
+- resolve lumora.config.ts relative to import.meta.dir (`d04f836`)
+
+### Maintenance
+
+- bump version to 0.8.1 (`9f9057a`)
+
+
+---
+
 ## [0.8.1] — 2026-08-08
 
 ### Added

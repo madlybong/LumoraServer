@@ -81,14 +81,15 @@ async function verifyJwt(token: string, config: Extract<LumoraAuthConfig, { mode
  */
 export async function resolveAuthFromContext(
   c: Context,
-  auth: LumoraAuthConfig
+  auth: LumoraAuthConfig,
+  tokenOverride?: string
 ): Promise<LumoraAuthResult | undefined> {
   if (auth.mode === "disabled") {
     return undefined;
   }
 
   const headerName = auth.mode === "static" ? auth.header ?? "authorization" : "authorization";
-  const headerValue = c.req.header(headerName);
+  const headerValue = tokenOverride ?? c.req.header(headerName);
   if (!headerValue) {
     throw new Error("Missing authorization header.");
   }
