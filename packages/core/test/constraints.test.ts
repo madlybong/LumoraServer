@@ -49,8 +49,8 @@ describe("Unique constraints", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ sku: "SKU-001", name: "Widget B" })
     });
-    // Should fail due to unique constraint
-    expect(duplicate.status).toBe(500);
+    // Should fail due to unique constraint (returns 409)
+    expect(duplicate.status).toBe(409);
 
     await lumora.close();
   });

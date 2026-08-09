@@ -19,6 +19,7 @@ import { rateLimit, MemoryRateLimitStore, PostgresRateLimitStore } from "./rate-
 import { startScheduler } from "./scheduler";
 import { createQueryExecutor } from "./query";
 import { LumoraMigrationEngine } from "./migrations";
+import { LumoraDuplicateError } from "./types";
 
 import type {
   DefineResourceResult,
@@ -247,7 +248,8 @@ function buildAudit(method: string, pathname: string, requestId: string): Reques
 async function authorize(
   config: ResolvedLumoraConfig,
   resource: DefineResourceResult,
-  c: Context<{ Variables: AppVariables }>
+  c: Context<{ Variables: AppVariables }>,
+  tokenOverride?: string
 ) {
   const mode = resource.auth?.mode ?? "inherit";
   if (mode === "public") {
@@ -256,7 +258,7 @@ async function authorize(
   if (config.mode !== "production" && config.auth.mode === "disabled") {
     return undefined;
   }
-  return resolveAuthFromContext(c as any, config.auth);
+  return resolveAuthFromContext(c as any, config.auth, tokenOverride);
 }
 
 async function authorizeOrRespond(
@@ -472,6 +474,7 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
         filters: new URL(c.req.url).searchParams,
         search: c.req.query("search"),
         sort: c.req.query("sort"),
+        cursor: c.req.query("cursor"),
         page,
         pageSize,
         scope: scopeOption
@@ -493,7 +496,7 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       items = items.map(record => filterFieldsByRole(record, resource, userRoles));
       const totalPages = result.pageSize > 0 ? Math.ceil(result.total / result.pageSize) : 0;
       const hasNextPage = result.page < totalPages;
-      return c.json({ ok: true, data: items, total: result.total, page: result.page, pageSize: result.pageSize, totalPages, hasNextPage });
+      return c.json({ ok: true, data: items, total: result.total, page: result.page, pageSize: result.pageSize, totalPages, hasNextPage, nextCursor: result.nextCursor });
     });
 
     // LS-5: CSV export endpoint (only if resource declares export.csv)
@@ -546,14 +549,39 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
         }
         const audit = buildAudit("POST", new URL(c.req.url).pathname, requestId);
         const transactional = resource.bulk?.transactional !== false;
-        // Validate all records first (outside DB transaction)
+        const operation = (body.operation as "create" | "update" | "delete") ?? "create";
+
+        if (operation === "delete") {
+          const ids = rawRecords.map(String);
+          const dbResults = await database.deleteBulk(resource, ids, audit);
+          
+          let dbIdx = 0;
+          const results = ids.map((id) => {
+            const result = dbResults[dbIdx++]!;
+            if (result.success && result.data) {
+              resource.hooks?.afterDelete?.(result.data);
+              const eventPayload: ResourceEventPayload = { resource: resource.resource, action: "deleted", record: result.data, audit };
+              events.emit("resource:delete:after", eventPayload);
+              realtime.publish(eventPayload);
+            }
+            return result;
+          });
+          const userRoles = auth?.roles ?? (auth?.claims?.roles as string[] | undefined) ?? [];
+          const filteredResults = results.map(r => r.data ? { ...r, data: filterFieldsByRole(r.data, resource, userRoles) } : r);
+          return c.json({ ok: true, results: filteredResults });
+        }
+
+        const isUpdate = operation === "update";
         const processedInputs: (Record<string, unknown> | { _error: string })[] = [];
         for (const raw of rawRecords) {
           try {
-            const payload = validatePayload(resource, parseBody(raw), "create");
-            const input = resource.hooks?.beforeCreate
-              ? await resource.hooks.beforeCreate({ input: payload, auth, resource, database })
-              : payload;
+            const payload = validatePayload(resource, parseBody(raw), isUpdate ? "update" : "create");
+            const input = isUpdate
+              ? (resource.hooks?.beforeUpdate ? await resource.hooks.beforeUpdate({ id: String((raw as any).id), input: payload, auth, resource, database }) : payload)
+              : (resource.hooks?.beforeCreate ? await resource.hooks.beforeCreate({ input: payload, auth, resource, database }) : payload);
+            if (isUpdate && (raw as any).id) {
+              input.id = (raw as any).id;
+            }
             processedInputs.push(input);
           } catch (err) {
             if (transactional) {
@@ -562,20 +590,28 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
             processedInputs.push({ _error: String(err) });
           }
         }
-        // Separate valid records from pre-validation errors (non-transactional only)
+        
         const validInputs = processedInputs.filter((r): r is Record<string, unknown> => !("_error" in r));
-        const dbResults = await database.createBulk(resource, validInputs, audit);
-        // Merge pre-validation errors back with DB results for non-transactional mode
+        const dbResults = isUpdate
+          ? await database.updateBulk(resource, validInputs, audit)
+          : await database.createBulk(resource, validInputs, audit);
+        
         let dbIdx = 0;
         const results = processedInputs.map((r) => {
           if ("_error" in r) return { success: false, error: (r as { _error: string })._error };
           const result = dbResults[dbIdx++]!;
           if (result.success && result.data) {
-            // Fire afterCreate and events for each successful record
-            resource.hooks?.afterCreate?.(result.data);
-            const eventPayload: ResourceEventPayload = { resource: resource.resource, action: "created", record: result.data, audit };
-            events.emit("resource:create:after", eventPayload);
-            realtime.publish(eventPayload);
+            if (isUpdate) {
+              resource.hooks?.afterUpdate?.(result.data);
+              const eventPayload: ResourceEventPayload = { resource: resource.resource, action: "updated", record: result.data, audit };
+              events.emit("resource:update:after", eventPayload);
+              realtime.publish(eventPayload);
+            } else {
+              resource.hooks?.afterCreate?.(result.data);
+              const eventPayload: ResourceEventPayload = { resource: resource.resource, action: "created", record: result.data, audit };
+              events.emit("resource:create:after", eventPayload);
+              realtime.publish(eventPayload);
+            }
           }
           return result;
         });
@@ -626,6 +662,9 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       try {
         record = await database.create(resource, input, audit);
       } catch (err) {
+        if (err instanceof LumoraDuplicateError) {
+          return c.json({ ok: false, error: err.message }, 409);
+        }
         logger.error("db:create", err, requestId);
         return c.json({ ok: false, error: String(err) }, 500);
       }
@@ -665,7 +704,16 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       const audit = buildAudit(method, new URL(c.req.url).pathname, requestId);
       const existingSnapshot = await database.get(resource, id) || {};
       events.emit("resource:update:before", { resource: resource.resource, action: "updated", record: input, audit });
-      const record = await database.update(resource, id, input, audit);
+      let record: Record<string, unknown> | null;
+      try {
+        record = await database.update(resource, id, input, audit);
+      } catch (err) {
+        if (err instanceof LumoraDuplicateError) {
+          return c.json({ ok: false, error: err.message }, 409);
+        }
+        logger.error("db:update", err, requestId);
+        return c.json({ ok: false, error: String(err) }, 500);
+      }
       if (!record) {
         return c.json({ ok: false, error: "Not found" }, 404);
       }
@@ -727,31 +775,54 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
     });
     app.get(
       `${resourceBase}/${config.realtime.websocketSuffix}`,
-      upgradeWebSocket((c) => ({
-        onOpen: (_event, ws) => {
-          realtime.attachSocket(resource.resource, ws);
-          ws.send(JSON.stringify({ type: "ready", resource: resource.resource }));
-        },
-        onMessage: (event, ws) => {
-          const text = typeof event.data === "string" ? event.data : "";
-          let message: unknown = text;
-          try {
-            message = JSON.parse(text);
-          } catch {}
-          const payload: ResourceEventPayload = {
-            resource: resource.resource,
-            action: "message",
-            message,
-            audit: buildAudit("WS", new URL(c.req.url).pathname, c.get("requestId"))
-          };
-          events.emit("realtime:message", payload);
-          realtime.publish(payload);
-        },
-        onClose: (_event, ws) => {
-          realtime.detachSocket(resource.resource, ws);
+      async (c, next) => {
+        let tokenOverride: string | undefined;
+        const protocols = c.req.header("sec-websocket-protocol");
+        if (protocols) {
+          tokenOverride = protocols.split(",")[0].trim();
         }
-      }))
+
+        const auth = await authorize(config, resource, c, tokenOverride).catch((err) => {
+          logger.event("auth", String(err));
+          return errorResponse(String(err), 401, c.get("requestId"));
+        });
+        
+        if (auth instanceof Response) {
+          return auth;
+        }
+
+        // Return a response directly? No, upgradeWebSocket returns a handler, so we need to call it.
+        // Wait, upgradeWebSocket returns a Middleware-like Handler.
+        // We can just await the handler it returns.
+        const handler = upgradeWebSocket((c) => ({
+          onOpen: (_event, ws) => {
+            realtime.attachSocket(resource.resource, ws);
+            ws.send(JSON.stringify({ type: "ready", resource: resource.resource }));
+          },
+          onMessage: (event, ws) => {
+            const text = typeof event.data === "string" ? event.data : "";
+            let message: unknown = text;
+            try {
+              message = JSON.parse(text);
+            } catch {}
+            const payload: ResourceEventPayload = {
+              resource: resource.resource,
+              action: "message",
+              message,
+              audit: buildAudit("WS", new URL(c.req.url).pathname, c.get("requestId"))
+            };
+            events.emit("realtime:message", payload);
+            realtime.publish(payload);
+          },
+          onClose: (_event, ws) => {
+            realtime.detachSocket(resource.resource, ws);
+          }
+        }))(c, next);
+
+        return handler;
+      }
     );
+
 
     app.get(`${resourceBase}/:id`, async (c) => {
       const auth = await authorize(config, resource, c).catch((err) => {

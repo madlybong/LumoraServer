@@ -7,7 +7,7 @@ export type LumoraMode = "development" | "production" | "test";
 
 export type FilterOperator =
   | "eq" | "neq" | "gt" | "gte" | "lt" | "lte"
-  | "in" | "nin" | "like" | "isnull" | "notnull";
+  | "in" | "nin" | "like" | "ilike" | "isnull" | "notnull";
 
 export type FieldType = "string" | "number" | "boolean" | "json" | "datetime" | "file" | "file[]";
 
@@ -484,4 +484,11 @@ export type LumoraHonoVariables = {
 export interface TypedEventEmitter<TMap extends object> {
   on<TKey extends keyof TMap>(event: TKey, listener: (payload: TMap[TKey]) => void): () => void;
   emit<TKey extends keyof TMap>(event: TKey, payload: TMap[TKey]): void;
+}
+
+export class LumoraDuplicateError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LumoraDuplicateError";
+  }
 }
