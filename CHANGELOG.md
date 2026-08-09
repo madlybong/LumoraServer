@@ -6,6 +6,15 @@
 
 ## [0.8.2] — 2026-08-09
 
+### Maintenance
+
+- bump version to 0.8.2 (`7a75fa9`)
+
+
+---
+
+## [0.8.2] — 2026-08-09
+
 ### Added
 
 - implement rate limiting, pagination, batch resolution, audit logging, and filter operators for v0.8.1 (`4bb5446`)
