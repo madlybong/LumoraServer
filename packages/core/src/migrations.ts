@@ -74,8 +74,8 @@ export class LumoraMigrationEngine {
     await this.db.ensureMigrationsTable();
     const applied = await this.db.getAppliedMigrations();
     const appliedNames = new Set(applied.map((r) => r.name));
-    const files = await this.discoverFiles();
-    const fileStems = new Set(files.map((f) => path.basename(f, ".sql")));
+    const files = await this.discoverMigrations();
+    const fileStems = new Set(files.map((f) => path.basename(f.name, ".sql")));
 
     if (!this.config.migrations.allowDowngrade) {
       for (const appliedMigration of applied) {
@@ -86,7 +86,7 @@ export class LumoraMigrationEngine {
     }
 
     const pending = files
-      .map((f) => path.basename(f, ".sql"))
+      .map((f) => path.basename(f.name, ".sql"))
       .filter((stem) => !appliedNames.has(stem));
     return { applied, pending };
   }
@@ -101,8 +101,8 @@ export class LumoraMigrationEngine {
     const applied = await this.db.getAppliedMigrations();
     const appliedMap = new Map(applied.map((r) => [r.name, r]));
 
-    const files = await this.discoverFiles();
-    const pendingFiles = files.filter((f) => !appliedMap.has(path.basename(f, ".sql")));
+    const files = await this.discoverMigrations();
+    const pendingFiles = files.filter((f) => !appliedMap.has(path.basename(f.name, ".sql")));
 
     if (pendingFiles.length > 0 && this.config.database.client === "sqlite" && this.config.database.autoBackup && !opts.dryRun) {
       await backupSqliteDatabase(this.config.database.url, this.logger);
@@ -111,11 +111,11 @@ export class LumoraMigrationEngine {
     const results: MigrationApplyResult[] = [];
 
     for (const file of files) {
-      const stem = path.basename(file, ".sql");
+      const stem = path.basename(file.name, ".sql");
+      const content = file.content;
       if (appliedMap.has(stem)) {
         // Already applied — optionally warn on checksum drift
         const existing = appliedMap.get(stem)!;
-        const content = await readFile(file, "utf8");
         const checksum = sha256(content);
         if (checksum !== existing.checksum) {
           throw new Error(`[lumora] Migration "${stem}" checksum mismatch (expected ${existing.checksum}, got ${checksum}). Editing applied migrations is prohibited.`);
@@ -123,7 +123,6 @@ export class LumoraMigrationEngine {
         continue;
       }
 
-      const content = await readFile(file, "utf8");
       const checksum = sha256(content);
 
       if (this.config.migrations.blockDestructive) {
@@ -159,10 +158,19 @@ export class LumoraMigrationEngine {
   // ─── Private helpers ────────────────────────────────────────────────────
 
   /**
-   * Discover all *.sql files in the migrations directory,
-   * sorted lexicographically (date-prefix guarantees chronological order).
+   * Discover migrations. If embeddedFiles is provided, return those.
+   * Otherwise, read *.sql files from the migrations directory.
+   * Sorts lexicographically.
    */
-  private async discoverFiles(): Promise<string[]> {
+  private async discoverMigrations(): Promise<{ name: string; content: string }[]> {
+    if (this.config.migrations.embeddedFiles) {
+      const entries = Object.entries(this.config.migrations.embeddedFiles);
+      return entries
+        .filter(([f]) => f.endsWith(".sql"))
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([name, content]) => ({ name, content }));
+    }
+
     const dir = this.config.migrations.dir;
     let entries: string[];
     try {
@@ -171,10 +179,14 @@ export class LumoraMigrationEngine {
       // Migrations directory does not exist — treat as empty (first boot with no migrations)
       return [];
     }
-    return entries
-      .filter((f) => f.endsWith(".sql"))
-      .sort()
-      .map((f) => path.join(dir, f));
+    
+    const fileNames = entries.filter((f) => f.endsWith(".sql")).sort();
+    const result: { name: string; content: string }[] = [];
+    for (const f of fileNames) {
+      const content = await readFile(path.join(dir, f), "utf8");
+      result.push({ name: f, content });
+    }
+    return result;
   }
 }
 

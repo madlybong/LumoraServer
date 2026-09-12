@@ -237,6 +237,11 @@ export interface LumoraMigrationsConfig {
   mode?: "auto" | "strict" | "off";
   allowDowngrade?: boolean;
   blockDestructive?: boolean;
+  /**
+   * Statically embedded SQL files (key: filename, value: SQL content).
+   * Used for Single File Executable (SFE) deployments.
+   */
+  embeddedFiles?: Record<string, string>;
 }
 
 export interface LumoraConfig {

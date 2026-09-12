@@ -30,6 +30,7 @@ async function createFixture(overrides: Partial<LumoraConfig> = {}) {
   const resolvedConfig = {
     ...config,
     migrations: {
+      ...config.migrations,
       dir: migrationsDir,
       mode: config.migrations.mode
     }
@@ -241,6 +242,31 @@ describe("LumoraMigrationEngine", () => {
 
     const engine = new LumoraMigrationEngine(db, resolvedConfig);
     await expect(engine.run()).resolves.toBeUndefined();
+
+    await db.close();
+  });
+
+  test("uses embeddedFiles when provided and ignores disk", async () => {
+    const { db, config } = await createFixture({
+      migrations: {
+        dir: "/non/existent/migrations/dir",
+        mode: "auto",
+        embeddedFiles: {
+          "20260101_001_embedded.sql": "CREATE TABLE embedded (id TEXT);"
+        }
+      }
+    });
+
+    const engine = new LumoraMigrationEngine(db, config);
+    await engine.run();
+
+    const applied = await db.getAppliedMigrations();
+    expect(applied.length).toBe(1);
+    expect(applied[0]?.name).toBe("20260101_001_embedded");
+
+    // verify table created
+    const tables = await db.sql`SELECT name FROM sqlite_master WHERE type='table' AND name='embedded'`;
+    expect(tables.length).toBe(1);
 
     await db.close();
   });
