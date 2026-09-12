@@ -88,7 +88,7 @@ export function resolveLumoraConfig(config: LumoraConfig, rootDir: string): Reso
       dir: path.resolve(rootDir, config.migrations?.dir ?? "migrations"),
       mode: migrationMode,
       allowDowngrade: config.migrations?.allowDowngrade ?? false,
-      blockDestructive: config.migrations?.blockDestructive ?? false
+      blockDestructive: config.migrations?.blockDestructive ?? (config.mode === "production")
     }
   };
 }
