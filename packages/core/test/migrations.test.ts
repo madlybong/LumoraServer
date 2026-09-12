@@ -7,6 +7,8 @@ import { LumoraMigrationEngine } from "../src/migrations";
 import { LumoraEventEmitter } from "../src/events";
 import { resolveLumoraConfig } from "../src/config";
 import type { LumoraEventMap, LumoraConfig } from "../src/types";
+import { backupSqliteDatabase } from "../src/sqlite-backup";
+import { stat } from "node:fs/promises";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -241,5 +243,26 @@ describe("LumoraMigrationEngine", () => {
     await expect(engine.run()).resolves.toBeUndefined();
 
     await db.close();
+  });
+});
+
+describe("sqlite-backup", () => {
+  test("creates a backup file for a valid sqlite database", async () => {
+    const tmpDir = await mkdtemp(path.join(os.tmpdir(), "lumora-backup-"));
+    const dbPath = path.join(tmpDir, "test.sqlite");
+    await writeFile(dbPath, "fake sqlite data", "utf8");
+
+    const backupFile = await backupSqliteDatabase(`sqlite://${dbPath}`);
+    expect(backupFile).toBeDefined();
+    if (backupFile) {
+      const stats = await stat(backupFile);
+      expect(stats.isFile()).toBe(true);
+      expect(path.basename(backupFile)).toStartWith("test_backup_");
+    }
+  });
+
+  test("skips backup for :memory: database", async () => {
+    const backupFile = await backupSqliteDatabase("sqlite://:memory:");
+    expect(backupFile).toBeUndefined();
   });
 });

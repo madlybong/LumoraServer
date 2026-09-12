@@ -191,11 +191,12 @@ export type LumoraAuthConfig = {
 );
 
 export type LumoraDatabaseConfig =
-  | { client: "sqlite"; url: string }
-  | { client: "mysql"; url: string }
+  | { client: "sqlite"; url: string; autoBackup?: boolean }
+  | { client: "mysql"; url: string; autoBackup?: boolean }
   | {
       client: "postgresql";
       url: string;
+      autoBackup?: boolean;
       pool?: { min?: number; max?: number; idleTimeout?: number };
       schema?: string;
       ssl?: boolean | { ca?: string; cert?: string; key?: string; rejectUnauthorized?: boolean };
@@ -306,8 +307,9 @@ export interface LumoraConfig {
   };
 }
 
-export interface ResolvedLumoraConfig extends LumoraConfig {
+export interface ResolvedLumoraConfig extends Omit<LumoraConfig, "database"> {
   rootDir: string;
+  database: LumoraDatabaseConfig & { autoBackup: boolean };
   server: {
     port: number;
   };

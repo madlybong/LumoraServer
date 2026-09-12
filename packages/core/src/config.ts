@@ -38,6 +38,10 @@ export function resolveLumoraConfig(config: LumoraConfig, rootDir: string): Reso
   return {
     ...config,
     rootDir,
+    database: {
+      ...config.database,
+      autoBackup: config.database.autoBackup ?? (config.database.client === "sqlite" && config.mode === "production")
+    },
     server: {
       port: config.server?.port ?? 3000
     },

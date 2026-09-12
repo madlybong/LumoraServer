@@ -4,6 +4,7 @@ import path from "node:path";
 import type { LumoraDatabase, MigrationRecord } from "./db";
 import type { ResolvedLumoraConfig } from "./types";
 import type { LumoraLogger } from "./logger";
+import { backupSqliteDatabase } from "./sqlite-backup";
 
 export interface MigrationStatus {
   applied: MigrationRecord[];
@@ -101,6 +102,12 @@ export class LumoraMigrationEngine {
     const appliedMap = new Map(applied.map((r) => [r.name, r]));
 
     const files = await this.discoverFiles();
+    const pendingFiles = files.filter((f) => !appliedMap.has(path.basename(f, ".sql")));
+
+    if (pendingFiles.length > 0 && this.config.database.client === "sqlite" && this.config.database.autoBackup && !opts.dryRun) {
+      await backupSqliteDatabase(this.config.database.url, this.logger);
+    }
+
     const results: MigrationApplyResult[] = [];
 
     for (const file of files) {
