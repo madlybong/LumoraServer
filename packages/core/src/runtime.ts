@@ -258,7 +258,13 @@ async function authorize(
   if (config.mode !== "production" && config.auth.mode === "disabled") {
     return undefined;
   }
-  return resolveAuthFromContext(c as any, config.auth, tokenOverride);
+  const authResult = await resolveAuthFromContext(c as any, config.auth, tokenOverride);
+  // LP-04: call afterVerify hook if configured
+  if (authResult && config.auth.mode === "jwt" && config.auth.afterVerify) {
+    const hookResult = await config.auth.afterVerify(authResult, c as any);
+    if (hookResult instanceof Response) return hookResult;
+  }
+  return authResult;
 }
 
 async function authorizeOrRespond(

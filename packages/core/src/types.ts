@@ -187,7 +187,31 @@ export type LumoraAuthConfig = {
 } & (
   | { mode: "disabled" }
   | { mode: "static"; token: string; header?: string }
-  | { mode: "jwt"; secret: string; issuer?: string; audience?: string; clockSkewSeconds?: number }
+  | {
+      mode: "jwt";
+      secret: string;
+      issuer?: string;
+      audience?: string;
+      clockSkewSeconds?: number;
+      /**
+       * Declare additional JWT payload fields that your application embeds.
+       * These fields already pass through in LumoraAuthResult.claims.
+       * This declaration is for documentation and future tooling purposes.
+       */
+      customClaims?: {
+        fields: string[];
+      };
+      /**
+       * Called after Lumora successfully verifies a JWT. Receives the resolved
+       * auth result and the Hono context. If this function returns a Response,
+       * that response is returned to the client immediately (the request is aborted).
+       * Returning void (or undefined) allows the request to proceed normally.
+       */
+      afterVerify?: (
+        auth: import("./types").LumoraAuthResult,
+        c: import("hono").Context
+      ) => Promise<Response | void> | Response | void;
+    }
 );
 
 export type LumoraDatabaseConfig =
@@ -350,6 +374,7 @@ export interface ResolvedLumoraConfig extends Omit<LumoraConfig, "database"> {
     mode: "auto" | "strict" | "off";
     allowDowngrade?: boolean;
     blockDestructive?: boolean;
+    embeddedFiles?: Record<string, string>;
   };
   rateLimit: {
     enabled: boolean;
