@@ -769,59 +769,61 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       return c.json({ ok: true, data: filterFieldsByRole(record, resource, userRoles) });
     });
 
-    app.get(`${resourceBase}/${config.realtime.sseSuffix}`, (c) => {
-      const authOpts: SseAuthOptions = config.auth.mode === "jwt" ? { mode: "query-token" } : { mode: "none" };
-      return realtime.createSseResponse(resource.resource, c, authOpts);
-    });
-    app.get(
-      `${resourceBase}/${config.realtime.websocketSuffix}`,
-      async (c, next) => {
-        let tokenOverride: string | undefined;
-        const protocols = c.req.header("sec-websocket-protocol");
-        if (protocols) {
-          tokenOverride = protocols.split(",")[0].trim();
-        }
-
-        const auth = await authorize(config, resource, c, tokenOverride).catch((err) => {
-          logger.event("auth", String(err));
-          return errorResponse(String(err), 401, c.get("requestId"));
-        });
-        
-        if (auth instanceof Response) {
-          return auth;
-        }
-
-        // Return a response directly? No, upgradeWebSocket returns a handler, so we need to call it.
-        // Wait, upgradeWebSocket returns a Middleware-like Handler.
-        // We can just await the handler it returns.
-        const handler = upgradeWebSocket((c) => ({
-          onOpen: (_event, ws) => {
-            realtime.attachSocket(resource.resource, ws);
-            ws.send(JSON.stringify({ type: "ready", resource: resource.resource }));
-          },
-          onMessage: (event, ws) => {
-            const text = typeof event.data === "string" ? event.data : "";
-            let message: unknown = text;
-            try {
-              message = JSON.parse(text);
-            } catch {}
-            const payload: ResourceEventPayload = {
-              resource: resource.resource,
-              action: "message",
-              message,
-              audit: buildAudit("WS", new URL(c.req.url).pathname, c.get("requestId"))
-            };
-            events.emit("realtime:message", payload);
-            realtime.publish(payload);
-          },
-          onClose: (_event, ws) => {
-            realtime.detachSocket(resource.resource, ws);
+    if (config.realtime.enabled) {
+      app.get(`${resourceBase}/${config.realtime.sseSuffix}`, (c) => {
+        const authOpts: SseAuthOptions = config.auth.mode === "jwt" ? { mode: "query-token" } : { mode: "none" };
+        return realtime.createSseResponse(resource.resource, c, authOpts);
+      });
+      app.get(
+        `${resourceBase}/${config.realtime.websocketSuffix}`,
+        async (c, next) => {
+          let tokenOverride: string | undefined;
+          const protocols = c.req.header("sec-websocket-protocol");
+          if (protocols) {
+            tokenOverride = protocols.split(",")[0].trim();
           }
-        }))(c, next);
 
-        return handler;
-      }
-    );
+          const auth = await authorize(config, resource, c, tokenOverride).catch((err) => {
+            logger.event("auth", String(err));
+            return errorResponse(String(err), 401, c.get("requestId"));
+          });
+          
+          if (auth instanceof Response) {
+            return auth;
+          }
+
+          // Return a response directly? No, upgradeWebSocket returns a handler, so we need to call it.
+          // Wait, upgradeWebSocket returns a Middleware-like Handler.
+          // We can just await the handler it returns.
+          const handler = upgradeWebSocket((c) => ({
+            onOpen: (_event, ws) => {
+              realtime.attachSocket(resource.resource, ws);
+              ws.send(JSON.stringify({ type: "ready", resource: resource.resource }));
+            },
+            onMessage: (event, ws) => {
+              const text = typeof event.data === "string" ? event.data : "";
+              let message: unknown = text;
+              try {
+                message = JSON.parse(text);
+              } catch {}
+              const payload: ResourceEventPayload = {
+                resource: resource.resource,
+                action: "message",
+                message,
+                audit: buildAudit("WS", new URL(c.req.url).pathname, c.get("requestId"))
+              };
+              events.emit("realtime:message", payload);
+              realtime.publish(payload);
+            },
+            onClose: (_event, ws) => {
+              realtime.detachSocket(resource.resource, ws);
+            }
+          }))(c, next);
+
+          return handler;
+        }
+      );
+    }
 
 
     app.get(`${resourceBase}/:id`, async (c) => {

@@ -23,7 +23,8 @@ async function createRealtimeFixture() {
     api: { base: "/api", version: "v1" },
     auth: { mode: "disabled" },
     database: { client: "sqlite", url: "sqlite://:memory:" },
-    routes: { dir: routesDir }
+    routes: { dir: routesDir },
+    realtime: { enabled: true }
   });
 }
 
@@ -46,7 +47,8 @@ async function createJwtRealtimeFixture() {
     api: { base: "/api", version: "v1" },
     auth: { mode: "jwt", secret: "supersecret" },
     database: { client: "sqlite", url: "sqlite://:memory:" },
-    routes: { dir: routesDir }
+    routes: { dir: routesDir },
+    realtime: { enabled: true }
   });
 }
 
@@ -117,6 +119,25 @@ describe("realtime", () => {
     const reader = resValid.body!.getReader();
     await reader.read();
 
+    server.stop(true);
+    await lumora.close();
+  });
+
+  test("realtime disabled — /events and /ws return 404", async () => {
+    // fixture without realtime: { enabled: true }
+    const lumora = await initLumora({
+      name: "no-realtime",
+      mode: "development",
+      api: { base: "/api", version: "v1" },
+      auth: { mode: "disabled" },
+      database: { client: "sqlite", url: "sqlite://:memory:" },
+      resources: [{ kind: "resource", resource: "item", fields: { name: { type: "string" } } }]
+      // no realtime block — defaults to disabled under Option C
+    });
+
+    const server = Bun.serve({ port: 0, fetch: lumora.fetch, websocket: lumora.websocket });
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/v1/item/events`);
+    expect(res.status).toBe(404);
     server.stop(true);
     await lumora.close();
   });

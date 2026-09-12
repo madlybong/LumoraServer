@@ -261,6 +261,7 @@ export interface LumoraConfig {
     openApiPath?: string;
   };
   realtime?: {
+    enabled?: boolean;
     sseSuffix?: string;
     websocketSuffix?: string;
   };
@@ -316,6 +317,7 @@ export interface ResolvedLumoraConfig extends LumoraConfig {
     openApiPath: string;
   };
   realtime: {
+    enabled: boolean;
     sseSuffix: string;
     websocketSuffix: string;
   };

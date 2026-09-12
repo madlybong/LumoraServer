@@ -47,6 +47,7 @@ export function resolveLumoraConfig(config: LumoraConfig, rootDir: string): Reso
       openApiPath: config.docs?.openApiPath ?? "/__lumora/openapi.json"
     },
     realtime: {
+      enabled: config.realtime?.enabled ?? false,
       sseSuffix: config.realtime?.sseSuffix ?? "events",
       websocketSuffix: config.realtime?.websocketSuffix ?? "ws"
     },

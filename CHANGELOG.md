@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### BREAKING CHANGES
+
+- **Realtime endpoints are now opt-in.** SSE (`/{resource}/events`) and WebSocket
+  (`/{resource}/ws`) routes are no longer mounted automatically. Projects that use
+  realtime must add `realtime: { enabled: true }` to their `defineLumoraConfig()` call.
+  Projects that do not use realtime are unaffected.
+
 ---
 
 ## [0.8.2] — 2026-08-09

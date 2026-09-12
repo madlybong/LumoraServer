@@ -11,6 +11,7 @@ export interface InitAnswers {
   database: "sqlite" | "mysql";
   routesDir: string;
   docs: boolean;
+  realtime: boolean;
 }
 
 export async function detectExistingBunApp(targetDir: string): Promise<boolean> {
@@ -34,7 +35,8 @@ export async function runInitWizard(targetDir = process.cwd()): Promise<void> {
     auth: ((await rl.question("Auth mode (disabled/static/jwt): ")) || "disabled") as InitAnswers["auth"],
     database: ((await rl.question("Database (sqlite/mysql): ")) || "sqlite") as InitAnswers["database"],
     routesDir: (await rl.question("Routes directory (routes): ")) || "routes",
-    docs: ((await rl.question("Enable docs in development? (y/n): ")) || "y").toLowerCase() !== "n"
+    docs: ((await rl.question("Enable docs in development? (y/n): ")) || "y").toLowerCase() !== "n",
+    realtime: ((await rl.question("Enable realtime (SSE/WebSocket) endpoints? (y/n): ")) || "n").toLowerCase() !== "n"
   };
 
   rl.close();
@@ -103,7 +105,7 @@ export default defineLumoraConfig({
   },
   docs: {
     enabled: ${answers.docs ? "true" : "false"}
-  }
+  }${answers.realtime ? ",\n  realtime: {\n    enabled: true\n  }" : ""}
 });
 `
   );
@@ -166,9 +168,9 @@ console.log(\`Lumora listening on http://localhost:\${server.port}\`);
 - Migrations directory: \`migrations/\`
 - Dev command: \`bun run dev:lumora\`
 - Generated REST path: ${answers.base}/${answers.version}/company
-- Realtime endpoints:
-  - SSE: ${answers.base}/${answers.version}/company/events
-  - WebSocket: ${answers.base}/${answers.version}/company/ws
+${answers.realtime
+    ? `- Realtime endpoints:\n  - SSE: ${answers.base}/${answers.version}/company/events\n  - WebSocket: ${answers.base}/${answers.version}/company/ws`
+    : `- Realtime endpoints: disabled (add \`realtime: { enabled: true }\` to config to enable)`}
 
 ## Migrations
 
