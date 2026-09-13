@@ -8,6 +8,15 @@
 
 ### Maintenance
 
+- bump version to 0.8.6 (`80a1aae`)
+
+
+---
+
+## [0.8.6] — 2026-09-13
+
+### Maintenance
+
 - Test release to verify the updated NPM authentication token in the CI pipeline
 
 
