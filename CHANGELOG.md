@@ -2,12 +2,32 @@
 
 ## Unreleased
 
-### BREAKING CHANGES
+---
 
-- **Realtime endpoints are now opt-in.** SSE (`/{resource}/events`) and WebSocket
-  (`/{resource}/ws`) routes are no longer mounted automatically. Projects that use
-  realtime must add `realtime: { enabled: true }` to their `defineLumoraConfig()` call.
-  Projects that do not use realtime are unaffected.
+## [0.8.3] — 2026-09-13
+
+### Added
+
+- LP-04 — afterVerify hook and customClaims declaration (`144e644`)
+- LP-01 — add sfe-prep command to embed migrations (`d765ff7`)
+- LP-02 — auto-backup SQLite databases before running migrations (`4e5ed85`)
+- LP-05 — realtime endpoints are now opt-in (`1179645`)
+- LP-03 — production defaults blockDestructive to true (`5332606`)
+- implement rate limiting, pagination, batch resolution, audit logging, and filter operators for v0.8.1 (`4bb5446`)
+
+### Fixed
+
+- resolve lumora.config.ts relative to import.meta.dir (`d04f836`)
+
+### Changed
+
+- standardize config shapes, inject LLM compatibility matrices, and remove legacy schemas (`cb696c8`)
+
+### Maintenance
+
+- bump version to 0.8.2 (`7a75fa9`)
+- bump version to 0.8.1 (`9f9057a`)
+
 
 ---
 
