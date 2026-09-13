@@ -4,6 +4,26 @@
 
 ---
 
+## [0.8.8] — 2026-09-13
+
+### Security
+
+- Resolved CodeQL ReDoS vulnerability warnings in `resource.ts` and `docs.ts` by refactoring trim regex (`03ebcb3`)
+- Resolved CodeQL URL sanitization warning in AI tests with strict hostname matching (`03ebcb3`)
+- Bumped `nodemailer` to `^10.0.9` to permanently resolve DoS, SSRF, and domain allow-list bypass vulnerabilities (`03ebcb3`)
+
+### Maintenance
+
+- update CHANGELOG for v0.8.7 (`9cda126`)
+- bump version to 0.8.7 (`c271d5f`)
+- update CHANGELOG for v0.8.6 (`55e17da`)
+- bump version to 0.8.6 (`80a1aae`)
+- update CHANGELOG for v0.8.5 (`292a877`)
+- bump version to 0.8.5 (`de1324a`)
+
+
+---
+
 ## [0.8.7] — 2026-09-13
 
 ### Maintenance
