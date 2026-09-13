@@ -8,6 +8,27 @@
 
 ### Added
 
+- LP-04 — afterVerify hook and customClaims declaration (`1ac9f68`)
+- LP-01 — add sfe-prep command to embed migrations (`b2c1146`)
+- LP-02 — auto-backup SQLite databases before running migrations (`8eca879`)
+- LP-05 — realtime endpoints are now opt-in (`ab9546c`)
+- LP-03 — production defaults blockDestructive to true (`c2f7ca1`)
+
+### Changed
+
+- standardize config shapes, inject LLM compatibility matrices, and remove legacy schemas (`6f5584d`)
+
+### Maintenance
+
+- bump version to 0.8.3 (`5e344ce`)
+
+
+---
+
+## [0.8.3] — 2026-09-13
+
+### Added
+
 - LP-04 — afterVerify hook and customClaims declaration (`144e644`)
 - LP-01 — add sfe-prep command to embed migrations (`d765ff7`)
 - LP-02 — auto-backup SQLite databases before running migrations (`4e5ed85`)
