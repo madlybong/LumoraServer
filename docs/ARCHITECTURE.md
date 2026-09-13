@@ -12,6 +12,10 @@ Lumora now has one main runtime package and one reference app. The runtime flow 
 
 The parent app calls `initLumora(...)` and passes the returned `fetch` and `websocket` handlers into `Bun.serve(...)`.
 
+## Agentic Architecture Recommendation
+
+For a clean, production-ready, and AI-friendly setup, Lumora recommends explicitly separating **Declarative Resources** from **Imperative Routes**. See the [Recommended Project Template](PROJECT_TEMPLATE.md) for details on setting up `src/resources` and `src/routes`.
+
 ## Core modules
 
 All active framework code lives in `packages/core/src`.

@@ -12,6 +12,7 @@ export interface InitAnswers {
   routesDir: string;
   docs: boolean;
   realtime: boolean;
+  agentic: boolean;
 }
 
 export async function detectExistingBunApp(targetDir: string): Promise<boolean> {
@@ -27,17 +28,21 @@ export async function runInitWizard(targetDir = process.cwd()): Promise<void> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   const existing = await detectExistingBunApp(targetDir);
 
-  const answers: InitAnswers = {
-    projectName: (await rl.question(`Project name (${path.basename(targetDir)}): `)) || path.basename(targetDir),
-    base: (await rl.question("API base path (/api): ")) || "/api",
-    version: (await rl.question("API version (v1): ")) || "v1",
-    mode: ((await rl.question("Default mode (development/production): ")) || "development") as InitAnswers["mode"],
-    auth: ((await rl.question("Auth mode (disabled/static/jwt): ")) || "disabled") as InitAnswers["auth"],
-    database: ((await rl.question("Database (sqlite/mysql): ")) || "sqlite") as InitAnswers["database"],
-    routesDir: (await rl.question("Routes directory (routes): ")) || "routes",
-    docs: ((await rl.question("Enable docs in development? (y/n): ")) || "y").toLowerCase() !== "n",
-    realtime: ((await rl.question("Enable realtime (SSE/WebSocket) endpoints? (y/n): ")) || "n").toLowerCase() !== "n"
-  };
+  const projectName = (await rl.question(`Project name (${path.basename(targetDir)}): `)) || path.basename(targetDir);
+  const base = (await rl.question("API base path (/api): ")) || "/api";
+  const version = (await rl.question("API version (v1): ")) || "v1";
+  const mode = ((await rl.question("Default mode (development/production): ")) || "development") as InitAnswers["mode"];
+  const auth = ((await rl.question("Auth mode (disabled/static/jwt): ")) || "disabled") as InitAnswers["auth"];
+  const database = ((await rl.question("Database (sqlite/mysql): ")) || "sqlite") as InitAnswers["database"];
+  
+  const agentic = ((await rl.question("Use recommended AI-agentic project structure? (Y/n): ")) || "y").toLowerCase() !== "n";
+  const defaultRoutesDir = agentic ? "src/resources" : "routes";
+  const routesDir = (await rl.question(`Resource directory (${defaultRoutesDir}): `)) || defaultRoutesDir;
+  
+  const docs = ((await rl.question("Enable docs in development? (Y/n): ")) || "y").toLowerCase() !== "n";
+  const realtime = ((await rl.question("Enable realtime (SSE/WebSocket) endpoints? (y/N): ")) || "n").toLowerCase() === "y";
+
+  const answers: InitAnswers = { projectName, base, version, mode, auth, database, routesDir, docs, realtime, agentic };
 
   rl.close();
   await scaffoldLumoraProject(targetDir, answers, existing);
@@ -49,6 +54,11 @@ export async function scaffoldLumoraProject(targetDir: string, answers: InitAnsw
   await mkdir(path.join(targetDir, answers.routesDir), { recursive: true });
   await mkdir(path.join(targetDir, "src"), { recursive: true });
   await mkdir(path.join(targetDir, "migrations"), { recursive: true });
+  if (answers.agentic) {
+    await mkdir(path.join(targetDir, "src", "routes"), { recursive: true });
+    await mkdir(path.join(targetDir, "src", "services"), { recursive: true });
+    await mkdir(path.join(targetDir, "tests"), { recursive: true });
+  }
 
   const packageJsonPath = path.join(targetDir, "package.json");
   const currentPackage = existingApp ? JSON.parse(await readFile(packageJsonPath, "utf8")) : { name: answers.projectName, version: "0.1.0", scripts: {} };
@@ -159,6 +169,22 @@ console.log(\`Lumora listening on http://localhost:\${server.port}\`);
 -- );
 `
   );
+  const cursorRulesContent = answers.agentic
+    ? `# Lumora Agentic Recommended Structure
+1. Always ask the user if they want to follow the 'Lumora Recommended Agentic Structure' before generating new domains.
+2. Strictly use \`src/resources/\` for declarative schemas (using defineResource).
+3. Use \`src/routes/\` for imperative Hono endpoints.
+4. Use \`src/services/\` for business logic and integrations.
+5. Place tests in the \`tests/\` directory and use \`bun test\`.
+`
+    : `# Lumora Custom Structure
+1. Always ask the user if they want to follow the 'Lumora Recommended Agentic Structure' before generating new domains. If they decline, adapt to their custom directory structure.
+2. The user has opted for a simpler structure. Place resources in \`${answers.routesDir}/\`.
+`;
+
+  await writeFile(path.join(targetDir, ".cursorrules"), cursorRulesContent);
+  await writeFile(path.join(targetDir, "llms.txt"), cursorRulesContent);
+
   await writeFile(
     path.join(targetDir, "LUMORA_SETUP.md"),
     `# Lumora Setup

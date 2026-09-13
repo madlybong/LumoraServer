@@ -235,6 +235,7 @@ LumoraServer/
 ## Documentation
 
 - [Project Overview](./docs/PROJECT.md)
+- [Recommended Project Template](./docs/PROJECT_TEMPLATE.md)
 - [Architecture Guide](./docs/ARCHITECTURE.md)
 - [Development Workflow](./docs/DEVELOPMENT.md)
 - [Release Workflow](./docs/RELEASES.md)

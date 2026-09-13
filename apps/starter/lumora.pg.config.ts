@@ -12,7 +12,9 @@ export default defineLumoraConfig({
     pool:   { min: 2, max: 10 },
     ssl:    false,
   },
-  routes: { dir: "./routes" },
+  routes: {
+    dir: "./src/resources"
+  },
   migrations: { dir: "./migrations/pg" },
   docs: { enabled: true },
   cors: { origin: "*" },

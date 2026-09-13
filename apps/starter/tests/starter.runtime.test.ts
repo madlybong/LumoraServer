@@ -119,7 +119,7 @@ describe("LP-05 · Realtime routes opt-in", () => {
       auth: { mode: "disabled" },
       database: { client: "sqlite", url: ":memory:" },
       realtime: { enabled: false },
-      routes: { dir: path.join(import.meta.dir, "../routes") }
+      routes: { dir: path.join(import.meta.dir, "../src/resources") }
     });
 
     const eventsRes = await lumora.app.request("/api/v1/todos/events");
@@ -147,7 +147,7 @@ describe("LP-01 · embeddedFiles migration source", () => {
           "20260524_001_initial_schema.sql": initialSchemaSql
         }
       },
-      routes: { dir: path.join(import.meta.dir, "../routes") }
+      routes: { dir: path.join(import.meta.dir, "../src/resources") }
     });
 
     const response = await lumora.app.request("/api/v1/todos");

@@ -5,7 +5,8 @@ const lumora = await initLumora(configPath);
 const ctx = createModuleContext(lumora);
 
 console.log(`[lumora] API prefix: ${lumora.apiPrefix}`);
-// lumora.mountModule("/billing", createBillingRouter(ctx));
+import customRoutes from "./routes/custom.js";
+lumora.app.route("/custom", customRoutes);
 
 const server = Bun.serve({
   port: lumora.config.server.port,

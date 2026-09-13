@@ -4,6 +4,39 @@
 
 ---
 
+## [0.8.4] — 2026-09-13
+
+### Added
+
+- LP-04 — afterVerify hook and customClaims declaration (`1ac9f68`)
+- LP-01 — add sfe-prep command to embed migrations (`b2c1146`)
+- LP-02 — auto-backup SQLite databases before running migrations (`8eca879`)
+- LP-05 — realtime endpoints are now opt-in (`ab9546c`)
+- LP-03 — production defaults blockDestructive to true (`c2f7ca1`)
+- implement rate limiting, pagination, batch resolution, audit logging, and filter operators for v0.8.1 (`4bb5446`)
+
+### Fixed
+
+- inject npm auth token directly and publish tarball to resolve 404 (`82cc4be`)
+- resolve lumora.config.ts relative to import.meta.dir (`d04f836`)
+
+### Changed
+
+- standardize config shapes, inject LLM compatibility matrices, and remove legacy schemas (`6f5584d`)
+
+### Maintenance
+
+- update CHANGELOG for v0.8.3 (`855aac8`)
+- bump version to 0.8.3 (`5e344ce`)
+- update CHANGELOG for v0.8.2 (`e92eb97`)
+- bump version to 0.8.2 (`7a75fa9`)
+- update CHANGELOG for v0.8.1 (`11d19da`)
+- bump version to 0.8.1 (`9f9057a`)
+- update CHANGELOG for v0.8.0 (`8a04a13`)
+
+
+---
+
 ## [0.8.3] — 2026-09-13
 
 ### Added

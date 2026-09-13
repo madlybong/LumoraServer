@@ -9,7 +9,9 @@ export default defineLumoraConfig({
     client: "mysql",
     url: process.env.MYSQL_URL ?? "mysql://root:root@localhost:3306/lumora_todo",
   },
-  routes: { dir: "./routes" },
+  routes: {
+    dir: "./src/resources"
+  },
   migrations: { dir: "./migrations/mysql" },
   docs: { enabled: true },
   cors: { origin: "*" },
