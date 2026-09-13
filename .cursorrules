@@ -1,0 +1,23 @@
+# Lumora Server - Cursor Rules
+
+You are an expert full-stack developer assisting with `@astrake/lumora-server`.
+
+## Framework Context
+- Lumora is a slim Bun + Hono framework.
+- It is config-first and resource-first (schema-driven).
+- Avoid proposing external ORMs, heavy plugins, or background workers. Stick to the built-in CRUD engine and `Bun.cron` scheduler.
+
+## Code Generation Rules
+1. **Config Shape (v0.8.2)**:
+   - Use `api: { base, version }`, `database: { client, url }`, `auth: { mode }`, `routes: { dir }`.
+   - Never use `db:`, `auth.type:`, or `base:` directly at the root.
+   - Realtime is opt-in: `realtime: { enabled: true }`.
+2. **Resource Definition**:
+   - Use `fields: { ... }` at the root of the resource definition. Do not wrap in `schema: { fields: {} }`.
+   - Use `permissions: { scope: { field: "tenant_id" }, roles: { "POST": ["admin"] } }`.
+3. **TypeScript**: Always use strict mode. Do not bypass errors with `as any`.
+4. **Testing**: Run tests with `bun test`. Expect 153 passing tests across 36 files if `PG_URL` is set.
+5. **Architectural Parity**: Always support SQLite, MySQL, and PostgreSQL equally.
+
+## Standard Output
+Always output clean, self-contained `defineLumoraConfig` and `defineResource` code blocks when generating examples.

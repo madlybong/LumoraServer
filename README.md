@@ -56,7 +56,7 @@ git clone https://github.com/madlybong/LumoraServer.git
 cd LumoraServer
 bun install
 bun run check      # typecheck
-bun test           # run test suite
+bun test           # run test suite (153 tests)
 bun run dev        # start the reference starter app
 ```
 
@@ -64,30 +64,48 @@ bun run dev        # start the reference starter app
 
 ## Usage
 
-### PostgreSQL Quick-Start
+### Database Quick-Starts
 
+#### PostgreSQL
 ```typescript
 import { defineLumoraConfig } from "@astrake/lumora-server";
 
 export default defineLumoraConfig({
   database: {
     client: "postgresql",
-    url: "postgres://user:pass@localhost:5432/db"
+    url: process.env.PG_URL ?? "postgres://postgres:postgres@localhost:5432/db",
+    schema: "public",
+    pool: { min: 2, max: 10 }
   }
 });
 ```
 
+#### MySQL
+```typescript
+import { defineLumoraConfig } from "@astrake/lumora-server";
 
+export default defineLumoraConfig({
+  database: {
+    client: "mysql",
+    url: process.env.MYSQL_URL ?? "mysql://root:root@localhost:3306/db"
+  }
+});
+```
+
+#### SQLite (Full Config Example)
 ```ts
 // lumora.config.ts
 import { defineLumoraConfig } from "@astrake/lumora-server";
 
 export default defineLumoraConfig({
-  base: "/api",
-  version: "v1",
-  db: { client: "sqlite", url: "./app.db" },
-  auth: { type: "jwt", secret: process.env.JWT_SECRET! },
-  routes: "./routes",
+  name: "lumora-app",
+  mode: "development",
+  api: { base: "/api", version: "v1" },
+  database: { client: "sqlite", url: "./app.db" },
+  auth: { mode: "jwt", secret: process.env.JWT_SECRET! },
+  routes: { dir: "./routes" },
+  migrations: { dir: "./migrations/sqlite" },
+  realtime: { enabled: true },
   ai: {
     providers: { gemini: { apiKey: process.env.GEMINI_API_KEY! } },
     defaultProvider: "gemini",
@@ -165,7 +183,7 @@ const data = await lumora.query.execute(
 | Runtime | Bun 1.3.12 |
 | HTTP framework | Hono 4.9.7 |
 | Language | TypeScript 5.9+ |
-| Database | SQLite (`bun:sql`) · MySQL (optional) |
+| Database | SQLite (`bun:sqlite`), MySQL, PostgreSQL (`bun:postgres` / `bun:sql`) |
 | Auth | Static token · HS256 JWT |
 | Realtime | In-process SSE + WebSocket pub/sub hub |
 | Scheduling | Native `Bun.cron` (declarative DSL, retry, logging) |
@@ -194,6 +212,11 @@ const data = await lumora.query.execute(
 | LS-14 | Rate limiting | `rateLimit(opts)` middleware |
 | LS-15 | Advanced Filtering | `?field__gt=10`, `__in`, `__like` |
 | LS-16 | Audit Logs | `audit: true` in `defineResource()` |
+| LP-01 | SFE binary embedded migrations | `embeddedFiles` in config & `lumora sfe-prep` |
+| LP-02 | SQLite auto-backup | `autoBackup: true` in `database` config |
+| LP-03 | Prod-safe migration defaults | `blockDestructive: true` in `migrations` config |
+| LP-04 | Custom claims / afterVerify | `afterVerify` hook in `auth` config |
+| LP-05 | Opt-in Realtime routes | `realtime: { enabled: true }` in config |
 
 ---
 

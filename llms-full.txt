@@ -1,0 +1,82 @@
+# @astrake/lumora-server (Full Reference)
+
+This document contains full details for generating code compatible with `@astrake/lumora-server` v0.8.2.
+
+## Complete Configuration Signature
+```typescript
+export interface LumoraConfig {
+  name: string;
+  mode: "development" | "production" | "test";
+  api: { base: string; version: string };
+  database: {
+    client: "sqlite" | "mysql" | "postgresql";
+    url: string;
+    schema?: string; // Postgres only
+    pool?: { min: number; max: number }; // Postgres only
+    autoBackup?: boolean; // SQLite only
+  };
+  auth: {
+    mode: "disabled" | "static" | "jwt";
+    secret?: string;
+    afterVerify?: (ctx, claims) => Promise<AuthContext>;
+  };
+  routes: { dir: string };
+  migrations?: { dir: string; blockDestructive?: boolean; embeddedFiles?: any[] };
+  realtime?: { enabled: boolean };
+}
+```
+
+## Complete Resource Definition Options
+```typescript
+export interface DefineResourceOptions {
+  resource: string;
+  table?: string;
+  fields: Record<string, {
+    type: "string" | "number" | "boolean" | "file" | "file[]" | "json";
+    required?: boolean;
+    default?: any;
+    searchable?: boolean; // for ?search=
+    filterable?: boolean; // for ?field= and __gt, __lt, etc.
+    unique?: boolean;
+    indexed?: boolean;
+    hidden?: boolean; // excluded from GET responses
+    readOnly?: boolean; // excluded from client mutations
+    visibleTo?: string[]; // RBAC field redaction
+  }>;
+  computed?: Record<string, { type: string; resolve: (record, ctx) => any }>;
+  relations?: Record<string, { resource: string; foreignKey: string; type: "belongsTo" | "hasMany" }>;
+  audit?: boolean; // Enables _audit_logs
+  permissions?: {
+    scope?: { field: string }; // row-level multitenancy
+    roles?: Record<string, string[]>; // e.g. { "POST": ["admin"] }
+  };
+}
+```
+
+## Filtering Operators
+When `filterable: true` is set on a field, clients can use:
+- `?age=20` (exact match)
+- `?age__gt=20` (greater than)
+- `?age__lt=20` (less than)
+- `?status__in=active,pending` (in array)
+- `?name__like=john` (SQL LIKE)
+- `?name__ilike=john` (Case-insensitive LIKE for Postgres)
+- `?status__neq=deleted` (not equal)
+
+Pagination is built-in (`?page=1&pageSize=10` or `?limit=10`), returning `total`, `totalPages`, and `hasNextPage` metadata.
+
+## SFE Embedded Migrations
+For single-file executable deployments (`bun build --compile`):
+1. Run `bun run lumora sfe-prep` to generate `_migrations_embedded.ts`.
+2. Import the array and pass it to config:
+```typescript
+import embedded from "./_migrations_embedded.js";
+// ...
+migrations: { dir: "./migrations", embeddedFiles: embedded }
+```
+
+## Common Hallucinations to Avoid
+- **DO NOT** use `db:` in config. Use `database:`.
+- **DO NOT** use `auth.type:`. Use `auth.mode:`.
+- **DO NOT** nest resource fields inside a `schema` property (e.g. `schema: { fields: {} }`). Use top-level `fields: {}`.
+- **DO NOT** assume realtime works out-of-the-box. You MUST set `realtime: { enabled: true }`.

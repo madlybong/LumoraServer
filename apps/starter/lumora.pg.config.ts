@@ -13,7 +13,7 @@ export default defineLumoraConfig({
     ssl:    false,
   },
   routes: { dir: "./routes" },
-  migrations: { dir: "./apps/starter/migrations/pg" },
+  migrations: { dir: "./migrations/pg" },
   docs: { enabled: true },
   cors: { origin: "*" },
 });

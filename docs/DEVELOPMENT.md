@@ -15,7 +15,7 @@ By default, `bun test` runs only the SQLite/MySQL tests. To run the full test su
    `psql -U postgres -f tools/setup-pg-local.sql`
 3. Copy the `.env` template:
    `cp .env.example .env`
-4. Now `bun test` will execute all tests against the local database.
+4. Now `bun test` will execute all 153 tests across 36 files against the local database.
 
 ## Main commands
 
@@ -29,6 +29,12 @@ Run the local init wizard:
 
 ```bash
 bun run cli
+```
+
+Generate embedded migrations payload (SFE prep):
+
+```bash
+bun run lumora sfe-prep
 ```
 
 Build the active projects:

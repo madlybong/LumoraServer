@@ -29,6 +29,34 @@ The following capabilities landed across the v0.3.0–v0.5.0 releases:
 
 ---
 
+## Shipped in v0.8.0
+
+- Database rate limiting store (`lumora_rate_limits` via PostgreSQL).
+- Advanced declarative `schedule` framework with `lumora_cron_log` execution tracking.
+- Schema migration ledger table (`_migrations`).
+- Tenant ID scoping mechanisms.
+
+---
+
+## Shipped in v0.8.1
+
+- Comprehensive audit logging (`audit: true`).
+- Pagination metadata (`totalPages`, `hasNextPage`).
+- Advanced filtering operators (`__gt`, `__lt`, `__in`, `__neq`, `__like`, `__ilike`).
+- Batched query execution for relational includes (N+1 mitigation).
+
+---
+
+## Shipped in v0.8.2
+
+- **LP-01** SFE binary embedded migrations via `sfe-prep` CLI.
+- **LP-02** SQLite automatic `.bak` backups before migration apply.
+- **LP-03** Production-safe migration defaults (`blockDestructive: true`).
+- **LP-04** Custom JWT claims extraction and `afterVerify` lifecycle hooks.
+- **LP-05** Opt-in Realtime routes (`realtime: { enabled: true }`).
+
+---
+
 ## Near term
 
 - polish the `bunx init @astrake/lumora-server` experience

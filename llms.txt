@@ -1,0 +1,51 @@
+# @astrake/lumora-server
+
+> Slim **Bun + Hono** framework — typed config, file-based resources, auto-generated REST/SSE/WS endpoints.
+
+## Quick Start
+```bash
+bunx init @astrake/lumora-server
+```
+
+## Core Architectural Invariants (v0.8.2)
+1. **Config Shape**: `api`, `database`, `auth`, `routes`, `migrations`, `realtime`. Do not use `db:` or `auth.type:`.
+2. **Resource Definition**: `defineResource({ resource, fields, ... })`. Fields must be top-level under `fields: { ... }`.
+3. **Realtime**: `/events` (SSE) and `/ws` (WebSockets) require `realtime: { enabled: true }` in config.
+4. **Database Parity**: SQLite, MySQL, and PostgreSQL are supported first-class.
+5. **Production Safety**: `migrations.blockDestructive: true` is on by default in prod.
+
+## Canonical Config Example
+```typescript
+import { defineLumoraConfig } from "@astrake/lumora-server";
+
+export default defineLumoraConfig({
+  name: "my-app",
+  mode: "development",
+  api: { base: "/api", version: "v1" },
+  database: { client: "postgresql", url: process.env.PG_URL! },
+  auth: { mode: "jwt", secret: process.env.JWT_SECRET! },
+  routes: { dir: "./routes" },
+  realtime: { enabled: true },
+});
+```
+
+## Canonical Resource Example
+```typescript
+import { defineResource } from "@astrake/lumora-server";
+
+export default defineResource({
+  resource: "todos",
+  fields: {
+    title: { type: "string", required: true, searchable: true },
+    completed: { type: "boolean", default: false, filterable: true },
+    user_id: { type: "string", filterable: true }
+  },
+  permissions: {
+    scope: { field: "tenant_id" },
+    roles: { "POST": ["admin"] }
+  }
+});
+```
+
+## Full Reference
+For full documentation, types, and complete API reference, see [llms-full.txt](./llms-full.txt).

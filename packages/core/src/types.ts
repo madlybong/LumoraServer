@@ -146,6 +146,36 @@ export interface ResourceMeta {
 
 export type ResourceFields = Record<string, ResourceField>;
 
+/**
+ * Schema definition for a Lumora resource.
+ * 
+ * @example
+ * ```typescript
+ * import { defineResource } from "@astrake/lumora-server";
+ * 
+ * export default defineResource({
+ *   resource: "users",
+ *   fields: {
+ *     name: { type: "string", required: true, searchable: true },
+ *     email: { type: "string", required: true, unique: true },
+ *     role: { type: "string", default: "user" },
+ *     avatar: { type: "file", accept: ["image/*"] }
+ *   },
+ *   relations: {
+ *     posts: { resource: "posts", foreignKey: "author_id", type: "hasMany" }
+ *   },
+ *   computed: {
+ *     initials: { type: "string", resolve: (r) => r.name[0] }
+ *   },
+ *   audit: true,
+ *   permissions: {
+ *     scope: { field: "tenant_id" },
+ *     roles: { "POST": ["admin"] }
+ *   },
+ *   rateLimit: { max: 10, windowMs: 60000 }
+ * });
+ * ```
+ */
 export interface ResourceSchema<TFields extends ResourceFields = ResourceFields> {
   resource: string;
   table?: string;
@@ -182,6 +212,21 @@ export interface DefineResourceResult<TFields extends ResourceFields = ResourceF
   kind: "resource";
 }
 
+/**
+ * Configuration for authentication.
+ * 
+ * @example
+ * ```typescript
+ * auth: { 
+ *   mode: "jwt", 
+ *   secret: process.env.JWT_SECRET!,
+ *   customClaims: { fields: ["tenant_id"] },
+ *   afterVerify: async (auth, c) => {
+ *     if (auth.claims?.tenant_id !== "expected") return c.text("Forbidden", 403);
+ *   }
+ * }
+ * ```
+ */
 export type LumoraAuthConfig = {
   protectedPaths?: string[];
 } & (
@@ -214,6 +259,27 @@ export type LumoraAuthConfig = {
     }
 );
 
+/**
+ * Configuration for database connections.
+ * 
+ * @example
+ * ```typescript
+ * // PostgreSQL with pooling and schema
+ * database: {
+ *   client: "postgresql",
+ *   url: "postgres://user:pass@localhost:5432/db",
+ *   schema: "public",
+ *   pool: { min: 2, max: 10 }
+ * }
+ * 
+ * // SQLite with auto-backup
+ * database: {
+ *   client: "sqlite",
+ *   url: "./app.db",
+ *   autoBackup: true
+ * }
+ * ```
+ */
 export type LumoraDatabaseConfig =
   | { client: "sqlite"; url: string; autoBackup?: boolean }
   | { client: "mysql"; url: string; autoBackup?: boolean }
@@ -247,6 +313,19 @@ export interface LumoraScheduledTask {
   enabled?: boolean;
 }
 
+/**
+ * Configuration for the migration engine.
+ * 
+ * @example
+ * ```typescript
+ * migrations: {
+ *   dir: "./migrations",
+ *   mode: "auto",
+ *   blockDestructive: true,
+ *   embeddedFiles: {} // used for SFE
+ * }
+ * ```
+ */
 export interface LumoraMigrationsConfig {
   /**
    * Directory containing *.sql migration files.
@@ -268,6 +347,29 @@ export interface LumoraMigrationsConfig {
   embeddedFiles?: Record<string, string>;
 }
 
+/**
+ * Configuration schema for the Lumora Server.
+ * 
+ * @example
+ * ```typescript
+ * import { defineLumoraConfig } from "@astrake/lumora-server";
+ * 
+ * export default defineLumoraConfig({
+ *   name: "my-app",
+ *   mode: "development",
+ *   api: { base: "/api", version: "v1" },
+ *   database: { client: "postgresql", url: process.env.PG_URL! },
+ *   auth: { mode: "jwt", secret: process.env.JWT_SECRET! },
+ *   routes: { dir: "./routes" },
+ *   migrations: { dir: "./migrations" },
+ *   realtime: { enabled: true },
+ *   rateLimit: { enabled: true, max: 100, windowMs: 60000, store: "memory" },
+ *   schedule: [
+ *     { name: "sync", cron: "0 8 * * *", handler: async (ctx) => {} }
+ *   ]
+ * });
+ * ```
+ */
 export interface LumoraConfig {
   name: string;
   mode: LumoraMode;

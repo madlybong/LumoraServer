@@ -92,14 +92,19 @@ Resource auth can override behavior with:
 - `public`
 - `protected`
 
+**Custom Claims & Hooks**:
+With v0.8.2 (`LP-04`), JWT authentication supports custom claims extraction and an `afterVerify` hook. This enables token evaluation workflows (e.g. enforcing token freshness, checking against a denylist, or mapping `tenant_id` from custom headers) before yielding the authentication context.
+
 ## DB model
 
 The current runtime assumes DB-backed resources. The implementation is intentionally slim:
 
-- SQLite and MySQL config shapes are first-class
+- SQLite, MySQL, and PostgreSQL (`bun:postgres`) config shapes are first-class.
+- PostgreSQL adapter explicitly supports connection pooling (`pool: { min, max }`), `schema` definitions (mapped to `search_path`), and TLS/SSL configurations.
 - table creation is automatic per discovered resource
 - CRUD is generated directly from resource fields
 - transactions emit before/after/rollback events
+- **SQLite Auto-Backup (`LP-02`)**: When using SQLite in production, `database.autoBackup: true` automatically shadows the primary database file to a `.bak` timestamped copy immediately before applying any pending migrations.
 
 This is not an ORM layer. The resource DSL is smaller and more constrained by design.
 
@@ -113,6 +118,8 @@ Lumora keeps one resource event model across:
 - generated CRUD side effects
 
 That lets the parent app subscribe once and react consistently across transports.
+
+**Opt-in Mounting (`LP-05`)**: By default, `/events` (SSE) and `/ws` (WebSockets) routes are not mounted. They must be explicitly enabled via `realtime: { enabled: true }` in `lumora.config.ts`. This prevents idle WebSocket upgrades when realtime features are not required.
 
 ## Docs model
 
@@ -200,6 +207,16 @@ bun run lumora migrate --status
 # Print SQL without applying (CI safety check)
 bun run lumora migrate --dry-run
 ```
+
+### SFE Binary Embedding (LP-01)
+
+Single-File Executable (SFE) deployments using `bun build --compile` cannot access raw `.sql` migration files on the filesystem.
+The `lumora sfe-prep` CLI command reads all configured migration directories and generates a TypeScript file (e.g., `_migrations_embedded.ts`).
+In the config, `migrations.embeddedFiles` is then mapped to this generated array, allowing the migration engine to run entirely from memory.
+
+### Production Safety (LP-03)
+
+In production mode, `migrations.blockDestructive: true` is enabled by default. This safely prevents the execution of migration queries containing `DROP TABLE`, `DROP COLUMN`, or `TRUNCATE`, requiring manual database intervention for destructive operations.
 
 ### Relationship to ensureResource
 

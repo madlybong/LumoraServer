@@ -342,6 +342,21 @@ async function writeAudit(
   });
 }
 
+/**
+ * Initializes the Lumora server instance.
+ * 
+ * @example
+ * ```typescript
+ * import { initLumora } from "@astrake/lumora-server";
+ * 
+ * const lumora = await initLumora("./lumora.config.ts");
+ * export default {
+ *   port: 3000,
+ *   fetch: lumora.fetch,
+ *   websocket: lumora.websocket
+ * };
+ * ```
+ */
 export async function initLumora(configOrPath: LumoraConfig | string): Promise<LumoraInstance> {
   const config = await loadLumoraConfig(configOrPath);
   const events = new LumoraEventEmitter<LumoraEventMap>();

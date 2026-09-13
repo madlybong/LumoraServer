@@ -28,7 +28,7 @@ Keep the public API small (`defineLumoraConfig`, `defineResource`, `initLumora`)
 To prevent broken releases, all agents MUST follow these mandatory patterns:
 
 1. **The Three Environments:** You must reason about 3 environments:
-   - **Local:** Runs all 118 tests if `TEST_PG_URL` is configured in `.env`.
+   - **Local:** Runs all 153 tests across 36 files if `PG_URL` is configured in `.env`.
    - **CI Pull Request:** GitHub Actions with a real postgres service container.
    - **CI Release (main):** Triggers `npm publish` only after PR is green.
 2. **Release Gate Rule:** Any commit touching `db.ts`, `pg-*.test.ts`, `.github/workflows/*.yml`, or `bun-types` boundaries MUST go through a branch + Pull Request with green CI before merging to `main`. Never push these directly to `main`.
@@ -40,6 +40,14 @@ To prevent broken releases, all agents MUST follow these mandatory patterns:
 - **Resource Capabilities:** Extend resource types -> update generated runtime -> add starter example -> add tests -> update docs.
 - **Auth/Docs Behavior:** Extend config types & validation -> update runtime -> verify starter -> update docs & tests. Dev can disable auth; production MUST require it.
 - **DB Adapter/Engine:** Keep the adapter seam in `db.ts`. Prefer concrete SQLite/MySQL/PostgreSQL support over abstract ORMs. Keep transaction event emission semantics.
+
+## Architectural Constraints (v0.8.2)
+
+- **Config Shape:** The top-level config uses `api: { base, version }`, `database: { client, url }`, `auth: { mode }`, `routes: { dir }`. Do not hallucinate legacy `db:`, `auth.type:`, or `base:` properties.
+- **Realtime (LP-05):** SSE and WebSocket routes are strictly opt-in via `realtime: { enabled: true }`.
+- **Migrations (LP-01/03):** Migrations must be file-based plain SQL or embedded via `sfe-prep`. In production, `blockDestructive: true` is enforced by default.
+- **SQLite Backups (LP-02):** SQLite in production uses `autoBackup: true` before migrations.
+- **Auth Hooks (LP-04):** `afterVerify` hook and `customClaims` manage token freshness.
 
 ## Known Limitations (Do Not Over-Engineer)
 

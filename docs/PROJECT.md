@@ -52,6 +52,11 @@ There are no other active framework packages in the repo anymore.
 - advanced filtering operators (gt, lt, in, like)
 - paginated metadata (totalPages, hasNextPage)
 - file-based SQL migration engine with strict forward-only verification and auto-apply modes
+- SFE binary migration embedding (`sfe-prep`)
+- SQLite automatic migration backup
+- Production-safe destructive migration blocking
+- Custom JWT claims and `afterVerify` hooks
+- Opt-in realtime routing (SSE/WS)
 - interactive init wizard
 
 ## What the starter app proves
@@ -68,7 +73,7 @@ If a feature cannot be explained through that model, it likely does not fit the 
 ## Current limitations
 
 - the CRUD engine is intentionally simple and schema-first
-- first-class DB support is limited to SQLite and MySQL paths
+- first-class DB support includes SQLite, MySQL, and PostgreSQL paths
 - docs UI is intentionally lightweight
 - Administrator UI is not implemented yet
 - the init wizard is functional but still early compared to a polished published DX

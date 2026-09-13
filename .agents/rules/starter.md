@@ -12,8 +12,8 @@ This catalog defines rules for modifying the starter reference application under
 
 ## 'defineResource()' Required Block Checklist
 
-Every mock resource file under `apps/starter/resources/` must declare:
+Every mock resource file under `apps/starter/routes/` must declare:
 - `auth`: `{ mode: "protected" }` (or `disabled` explicitly in developer settings)
 - `audit`: `true` (if tracking mutations)
-- `schema`: `{ fields: { ... } }`
+- `fields`: `{ ... }`
 - `permissions`: `{ roles: { ... } }`

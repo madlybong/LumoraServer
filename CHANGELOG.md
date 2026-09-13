@@ -41,7 +41,11 @@
 
 ### Added
 
-- implement rate limiting, pagination, batch resolution, audit logging, and filter operators for v0.8.1 (`4bb5446`)
+- **LP-01**: SFE binary embedded migrations via `sfe-prep` CLI and `embeddedFiles` config.
+- **LP-02**: SQLite automatic `.bak` backups before migration apply (`autoBackup`).
+- **LP-03**: Production-safe migration defaults (`blockDestructive: true`).
+- **LP-04**: Custom JWT claims extraction and `afterVerify` lifecycle hooks in auth config.
+- **LP-05**: Opt-in Realtime routes (`realtime: { enabled: true }`).
 
 ### Fixed
 

@@ -22,8 +22,8 @@ This playbook encodes institutional knowledge to prevent repeating past mistakes
 5. **Run `bun run check` and `bun run build`.** Fix immediately if any errors.
 6. **Create a branch** (e.g., `feat/pg-my-feature`). Do NOT commit to `main` yet.
 7. **Run `bun test` locally:**
-   - If `.env` with `TEST_PG_URL` is configured → all 118 tests must pass.
-   - If no local PG → 113 non-pg tests must pass; 5 pg tests fail with connection refused (expected).
+   - If `.env` with `PG_URL` is configured → all 153 tests must pass.
+   - If no local PG → 148 non-pg tests must pass; 5 pg tests fail with connection refused (expected).
 8. **Push branch and open a PR.** Wait for GitHub Actions CI to go fully green.
 9. **Only then merge to `main`** and follow the release skill.
 

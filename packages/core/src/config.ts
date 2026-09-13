@@ -3,6 +3,23 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { LumoraAuthConfig, LumoraConfig, ResolvedLumoraConfig } from "./types";
 
+/**
+ * Defines and types a Lumora configuration object.
+ * 
+ * @example
+ * ```typescript
+ * import { defineLumoraConfig } from "@astrake/lumora-server";
+ * 
+ * export default defineLumoraConfig({
+ *   name: "my-app",
+ *   mode: "development",
+ *   api: { base: "/api", version: "v1" },
+ *   database: { client: "postgresql", url: process.env.PG_URL! },
+ *   auth: { mode: "jwt", secret: process.env.JWT_SECRET! },
+ *   routes: { dir: "./routes" }
+ * });
+ * ```
+ */
 export function defineLumoraConfig<TConfig extends LumoraConfig>(config: TConfig): TConfig {
   return config;
 }

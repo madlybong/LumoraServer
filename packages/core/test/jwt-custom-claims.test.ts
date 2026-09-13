@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { sign } from "hono/jwt";
 import type { LumoraConfig } from "../src/types";
 import { initLumora } from "../src/runtime";
+import { defineResource } from "../src/resource";
 
 describe("LP-04 Custom JWT Claims & afterVerify", () => {
   test("afterVerify hook is called and can reject requests", async () => {
@@ -28,18 +29,13 @@ describe("LP-04 Custom JWT Claims & afterVerify", () => {
       },
       database: { client: "sqlite", url: ":memory:" },
       resources: [
-        {
-          kind: "resource",
+        defineResource({
           resource: "widgets",
-          schema: {},
           fields: {
             title: { type: "string" }
           },
-          auth: { mode: "inherit" }, // protected
-          hooks: {
-            afterFindMany: async () => ({ data: [{ id: "w1" }], total: 1 })
-          }
-        }
+          auth: { mode: "inherit" }
+        })
       ]
     };
 
