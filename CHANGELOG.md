@@ -6,6 +6,15 @@
 
 ## [0.8.5] — 2026-09-13
 
+### Maintenance
+
+- bump version to 0.8.5 (`de1324a`)
+
+
+---
+
+## [0.8.5] — 2026-09-13
+
 ### Fixed
 
 - fix npm authentication in release workflow to properly resolve token on user config and avoid workspace config warnings
