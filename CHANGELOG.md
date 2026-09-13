@@ -6,6 +6,19 @@
 
 ## [0.8.8] — 2026-09-13
 
+### Fixed
+
+- resolve CodeQL and Dependabot alerts (`03ebcb3`)
+
+### Maintenance
+
+- bump version to 0.8.8 (`78e9f59`)
+
+
+---
+
+## [0.8.8] — 2026-09-13
+
 ### Security
 
 - Resolved CodeQL ReDoS vulnerability warnings in `resource.ts` and `docs.ts` by refactoring trim regex (`03ebcb3`)
