@@ -6,6 +6,15 @@
 
 ## [0.8.7] — 2026-09-13
 
+### Maintenance
+
+- bump version to 0.8.7 (`c271d5f`)
+
+
+---
+
+## [0.8.7] — 2026-09-13
+
 ### Fixed
 
 - Remove `npm config set` from release workflow to fix `ENOWORKSPACES` error when publishing from workspace folder (`packages/core`)
