@@ -134,7 +134,6 @@ jobs:
             echo "Error: NODE_AUTH_TOKEN is empty! Please check repository secret NPM_TOKEN."
             exit 1
           fi
-          rm -f .npmrc
-          npm config set //registry.npmjs.org/:_authToken "${NODE_AUTH_TOKEN}"
           npm publish *.tgz --access public
+
 

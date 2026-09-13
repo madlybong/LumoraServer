@@ -4,6 +4,16 @@
 
 ---
 
+## [0.8.7] — 2026-09-13
+
+### Fixed
+
+- Remove `npm config set` from release workflow to fix `ENOWORKSPACES` error when publishing from workspace folder (`packages/core`)
+
+
+
+---
+
 ## [0.8.6] — 2026-09-13
 
 ### Maintenance
