@@ -18,7 +18,8 @@ describe("scaffoldLumoraProject", () => {
         database: "sqlite",
         routesDir: "routes",
         docs: true,
-        realtime: true
+        realtime: true,
+        agentic: false
       },
       false
     );

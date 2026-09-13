@@ -26,7 +26,7 @@ if (tscCode !== 0) {
 }
 
 const coreBuild = Bun.spawn(
-  [process.execPath, "build", "./src/index.ts", "./bin/init.ts", "--outdir", "./dist", "--target", "bun"],
+  [process.execPath, "build", "./src/index.ts", "./bin/init.ts", "--outdir", "./dist", "--target", "bun", "--packages", "external"],
   {
     cwd: coreDir,
     stdout: "inherit",
@@ -41,7 +41,7 @@ if (coreCode !== 0) {
 // 2. Build apps/starter
 const starterDir = path.join(rootDir, "apps/starter");
 const starterBuild = Bun.spawn(
-  [process.execPath, "build", "./src/index.ts", "--outdir", "./dist", "--target", "bun"],
+  [process.execPath, "build", "./src/index.ts", "--outdir", "./dist", "--target", "bun", "--packages", "external"],
   {
     cwd: starterDir,
     stdout: "inherit",

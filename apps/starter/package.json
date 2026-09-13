@@ -7,11 +7,12 @@
     "dev": "bun run ./src/index.ts",
     "dev:mysql": "LUMORA_CONFIG=./apps/starter/lumora.mysql.config.ts bun run ./src/index.ts",
     "dev:pg": "LUMORA_CONFIG=./apps/starter/lumora.pg.config.ts bun run ./src/index.ts",
-    "build": "bun build ./src/index.ts --outdir ./dist --target bun",
+    "build": "bun build ./src/index.ts --outdir ./dist --target bun --packages external",
     "check": "tsc -p ./tsconfig.json",
     "typecheck": "tsc -p ./tsconfig.json"
   },
   "dependencies": {
-    "@astrake/lumora-server": "workspace:*"
+    "@astrake/lumora-server": "workspace:*",
+    "hono": "^4.9.7"
   }
 }

@@ -58,13 +58,12 @@ To prevent broken releases, all agents MUST follow these mandatory patterns:
 
 ## Release & Validation
 
-Validate with:
+You MUST validate your changes using the full CI pipeline before any release or commit that could trigger one.
+Do NOT manually run `check`, `test`, or `build` alone. You MUST run:
 ```bash
-bun run check
-bun test
-bun run build
-bun run version:check
+bun run validate
 ```
+This guarantees local parity with the GitHub Actions CI pipeline and prevents broken code from being pushed.
 
 Release steps:
 1. Update `VERSION` file.

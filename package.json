@@ -21,7 +21,8 @@
     "version:sync": "bun run ./tools/version.ts",
     "version:check": "bun run ./tools/version.ts && git diff --exit-code",
     "changelog": "bun run ./tools/changelog.ts",
-    "release:prep": "bun run ./tools/version.ts && bun run ./tools/changelog.ts"
+    "release:prep": "bun run ./tools/version.ts && bun run ./tools/changelog.ts",
+    "validate": "bun run ./tools/validate.ts"
   },
   "devDependencies": {
     "bun-types": "1.3.14",

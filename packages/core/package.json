@@ -53,7 +53,7 @@
   "scripts": {
     "prepack": "bun -e \"await Bun.write('README.md', await Bun.file('../../README.md').text()); await Bun.write('CHANGELOG.md', await Bun.file('../../CHANGELOG.md').text())\"",
     "postpack": "bun -e \"import { unlinkSync } from 'fs'; try { unlinkSync('README.md') } catch(e){} try { unlinkSync('CHANGELOG.md') } catch(e){}\"",
-    "build": "bun -e \"import { rmSync } from 'fs'; try { rmSync('dist', { recursive: true }) } catch(e) {} \" && tsc -p tsconfig.build.json && bun build ./src/index.ts ./bin/init.ts --outdir ./dist --target bun",
+    "build": "bun -e \"import { rmSync } from 'fs'; try { rmSync('dist', { recursive: true }) } catch(e) {} \" && tsc -p tsconfig.build.json && bun build ./src/index.ts ./bin/init.ts --outdir ./dist --target bun --packages external",
     "check": "tsc -p ./tsconfig.json",
     "typecheck": "tsc -p ./tsconfig.strict.json"
   },
