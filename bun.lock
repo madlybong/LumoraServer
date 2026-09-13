@@ -11,7 +11,7 @@
     },
     "apps/starter": {
       "name": "@lumora/starter",
-      "version": "0.8.4",
+      "version": "0.8.7",
       "dependencies": {
         "@astrake/lumora-server": "workspace:*",
         "hono": "^4.9.7",
@@ -19,13 +19,13 @@
     },
     "packages/core": {
       "name": "@astrake/lumora-server",
-      "version": "0.8.4",
+      "version": "0.8.7",
       "bin": {
         "lumora": "./dist/bin/init.js",
       },
       "dependencies": {
         "hono": "^4.9.7",
-        "nodemailer": "^8.0.6",
+        "nodemailer": "^10.0.9",
       },
       "devDependencies": {
         "@types/nodemailer": "^8.0.0",
@@ -46,7 +46,7 @@
 
     "hono": ["hono@4.12.15", "", {}, "sha512-qM0jDhFEaCBb4TxoW7f53Qrpv9RBiayUHo0S52JudprkhvpjIrGoU1mnnr29Fvd1U335ZFPZQY1wlkqgfGXyLg=="],
 
-    "nodemailer": ["nodemailer@8.0.6", "", {}, "sha512-Nm2XeuDwwy2wi5A+8jPWwQwNzcjNjhWdE3pVLoXEusxJqCnAPAgnBGkSmiLknbnWuOF9qraRpYZjfxqtKZ4tPw=="],
+    "nodemailer": ["nodemailer@10.0.9", "", {}, "sha512-BF0qcyplCwp+jMk6HCjFykBz/YhhZSsxrARhOldLwFWH+8kGjQsd2WIMIZhqEuyXRoGFi0ONbDeWDMDoL8MhLw=="],
 
     "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 

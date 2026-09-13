@@ -75,5 +75,5 @@ export function renderDocsUi(config: ResolvedLumoraConfig): string {
 }
 
 function trim(value: string): string {
-  return value.replace(/^\/+|\/+$/g, "");
+  return value.replace(/^\/+/g, "").replace(/\/+$/g, "");
 }

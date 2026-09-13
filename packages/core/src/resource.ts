@@ -26,5 +26,5 @@ export function defineResource<TFields extends ResourceFields>(
 }
 
 export function normalizeResourcePath(resource: string): string {
-  return resource.replace(/^\/+|\/+$/g, "");
+  return resource.replace(/^\/+/g, "").replace(/\/+$/g, "");
 }

@@ -27,14 +27,14 @@ afterAll(() => {
 function mockProvider(text: string, inputTokens = 10, outputTokens = 5) {
   fetchOverride = async (_input, _init) => {
     // Detect provider from URL
-    const url = String(_input);
-    if (url.includes("generativelanguage.googleapis.com")) {
+    const url = new URL(String(_input));
+    if (url.hostname === "generativelanguage.googleapis.com") {
       return new Response(JSON.stringify({
         candidates: [{ content: { parts: [{ text }] } }],
         usageMetadata: { promptTokenCount: inputTokens, candidatesTokenCount: outputTokens }
       }), { status: 200, headers: { "content-type": "application/json" } });
     }
-    if (url.includes("anthropic.com")) {
+    if (url.hostname.endsWith("anthropic.com")) {
       return new Response(JSON.stringify({
         content: [{ text }],
         usage: { input_tokens: inputTokens, output_tokens: outputTokens }
