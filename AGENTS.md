@@ -35,6 +35,15 @@ To prevent broken releases, all agents MUST follow these mandatory patterns:
 3. **Type-First Research Rule:** Before writing any code that calls a native `bun:*` API, you MUST open and read the relevant `node_modules/bun-types/*.d.ts` file. Do not guess or use internet examples.
 4. **Scratch File Policy:** Scratch and debug scripts must go in `tools/scratch/`. That directory's `.gitignore` prevents them from being committed. Clean up all scratch files before the final commit on any feature.
 
+## Procedural Route Heuristics (v0.8.9+)
+
+When developing custom non-CRUD routes mounted via `mountModule`, AI coders MUST adhere to the following guardrails:
+1. **Validation & Typing:** Never manually parse JSON. Use the exported `validate({ json: ... })` middleware and consume typed inputs from `c.var.valid.json`.
+2. **Standard Responses:** Never return raw JSON (e.g. `c.json({ data })`). Always use `c.var.ok(data)`, `c.var.list(data, meta)`, or `c.var.created(data)`.
+3. **Error Boundaries:** Throw `LumoraHttpError` for controlled failures. Never leak raw stack traces. The global `app.onError` will catch it.
+4. **Safe Database Reads:** When writing custom GET list endpoints with `db.sql`, always wrap your queries in `ctx.db.page(fragment, opts)` to prevent un-paginated queries from crashing the process.
+5. **Secure Mounts:** Supply strict bounds to `mountModule`, passing `{ protected: true, roles: [...], rateLimit: true, audit: true }` when writing enterprise features.
+
 ## Safe Extension Heuristics
 
 - **Resource Capabilities:** Extend resource types -> update generated runtime -> add starter example -> add tests -> update docs.

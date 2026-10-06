@@ -49,3 +49,28 @@ export default defineResource({
 
 ## Full Reference
 For full documentation, types, and complete API reference, see [llms-full.txt](./llms-full.txt).
+
+## Procedural Routes & Guards
+When building custom non-CRUD routes using `mountModule`, always use the standard guards and helpers:
+```typescript
+import { Hono } from "hono";
+import { validate, getPrincipal, LumoraHttpError } from "@astrake/lumora-server";
+import { z } from "zod";
+
+const router = new Hono();
+
+router.post("/custom", validate({ json: z.object({ query: z.string() }) }), async (c) => {
+  const user = getPrincipal(c);
+  const { query } = c.var.valid.json;
+
+  if (query === "error") {
+    throw new LumoraHttpError(400, "BAD_QUERY", "Invalid procedural query.");
+  }
+
+  // Use envelope helpers
+  return c.var.ok({ user: user.id, result: query });
+});
+
+// Mounted with options
+// lumora.mountModule("/procedural", router, { protected: true, roles: ["admin"], audit: true, rateLimit: true });
+```

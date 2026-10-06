@@ -243,3 +243,12 @@ v0.8.1 adds:
 - **Pagination Metadata**: `totalPages` and `hasNextPage` are included in list responses.
 - **Filter Operators**: Append `__gt`, `__lt`, `__in`, `__neq`, `__like`, or `__ilike` to query params (e.g. `?age__gt=21`).
 - **Batch Includes**: Relational loading uses a batched query pattern (solving N+1).
+
+## Procedural Guardrails (v0.8.9+)
+
+To enforce consistency between Auto-CRUD generated endpoints and custom manual routes, Lumora implements the following boundaries:
+
+- **Global Error Handling:** All unhandled exceptions in the Hono router fall back to the `app.onError` middleware. In `production` mode, raw stack traces are masked, emitting a generic HTTP 500 envelope. Developers can intentionally surface HTTP errors by throwing `LumoraHttpError`.
+- **Database Safety:** By configuring `database.maxRows` and `database.statementTimeoutMs`, Lumora prevents unbounded list queries in procedural logic from causing memory exhaustion. Un-paginated queries that exceed `maxRows` will trigger a throw or truncation.
+- **Envelope Consistency:** Using `c.var.ok()`, `c.var.list()`, and the `validate` middleware guarantees that all JSON mutations and list retrievals strictly conform to the Lumora HTTP shape (`{ok, data, error, meta}`).
+- **Declarative Modularity:** By passing options directly into `mountModule(path, router, { protected, roles, rateLimit, audit })`, custom logic is inherently shielded without redundant middleware boilerplate.

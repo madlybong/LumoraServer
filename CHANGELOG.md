@@ -4,6 +4,25 @@
 
 ---
 
+## [0.8.9] — 2026-10-06
+
+### Fixed
+
+- resolve CodeQL and Dependabot alerts (`03ebcb3`)
+
+### Maintenance
+
+- bump version to 0.8.8 (`78e9f59`)
+- update CHANGELOG for v0.8.7 (`9cda126`)
+- bump version to 0.8.7 (`c271d5f`)
+- update CHANGELOG for v0.8.6 (`55e17da`)
+- bump version to 0.8.6 (`80a1aae`)
+- update CHANGELOG for v0.8.5 (`292a877`)
+- bump version to 0.8.5 (`de1324a`)
+
+
+---
+
 ## [0.8.8] — 2026-09-13
 
 ### Fixed

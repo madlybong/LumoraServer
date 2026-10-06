@@ -220,6 +220,43 @@ const data = await lumora.query.execute(
 
 ---
 
+## Custom Procedural Routes (New in v0.8.9)
+
+When your application outgrows the Auto-CRUD endpoints, use `mountModule` to register procedural endpoints with enterprise-grade guardrails:
+
+```typescript
+import { Hono } from "hono";
+import { validate, getPrincipal, LumoraHttpError } from "@astrake/lumora-server";
+import { z } from "zod";
+
+const router = new Hono();
+
+// 1. Zod/Yup validation directly integrated with the Lumora error envelope
+router.post("/process", validate({ json: z.object({ query: z.string() }) }), async (c) => {
+  // 2. Safely extract the typed principal
+  const user = getPrincipal(c);
+  const data = c.var.valid.json;
+
+  if (data.query === "error") {
+    // 3. Throw intentional, structured HTTP errors
+    throw new LumoraHttpError(400, "BAD_QUERY", "Invalid procedural query");
+  }
+
+  // 4. Return standardized envelopes
+  return c.var.ok({ result: "Success" });
+});
+
+// 5. Mount with declarative boundaries (auth, roles, rate limits, audits)
+lumora.mountModule("/custom", router, { 
+  protected: true, 
+  roles: ["admin"], 
+  rateLimit: true,
+  audit: true 
+});
+```
+
+---
+
 ## Repo Shape
 
 ```

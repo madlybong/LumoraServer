@@ -20,6 +20,8 @@ import { startScheduler } from "./scheduler";
 import { createQueryExecutor } from "./query";
 import { LumoraMigrationEngine } from "./migrations";
 import { LumoraDuplicateError } from "./types";
+import { LumoraHttpError } from "./errors";
+import { parsePagination } from "./utils";
 
 import type {
   DefineResourceResult,
@@ -34,15 +36,13 @@ import type {
   ResourceExportCsvOptions,
   AuditLogOpts,
   LumoraModuleContext,
-  SseAuthOptions
+  SseAuthOptions,
+  LumoraHonoVariables
 } from "./types";
 
-type AppVariables = {
-  requestId: string;
-  lumoraJson: (data: unknown, status?: number) => Response;
-  lumoraError: (message: string, status?: number) => Response;
+interface AppVariables extends LumoraHonoVariables {
   jwtPayload?: unknown;
-};
+}
 
 function apiPrefix(config: ResolvedLumoraConfig): string {
   return `/${normalizeResourcePath(config.api.base)}/${normalizeResourcePath(config.api.version)}`.replace(/\/+/g, "/");
@@ -410,6 +410,29 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
     }
   }
 
+  app.onError((err, c) => {
+    logger.error("app:error", err, c.get("requestId"));
+    
+    if (err instanceof LumoraHttpError) {
+      return c.json({
+        ok: false,
+        error: { code: err.code, message: err.message, details: err.details },
+        requestId: c.get("requestId")
+      }, err.status as any);
+    }
+
+    const isProd = config.mode === "production";
+    return c.json({
+      ok: false,
+      error: {
+        code: "INTERNAL_SERVER_ERROR",
+        message: isProd ? "An unexpected internal error occurred." : (err as Error).message,
+        details: isProd ? undefined : (err as Error).stack
+      },
+      requestId: c.get("requestId")
+    }, 500);
+  });
+
   app.use("*", async (c, next) => {
     const requestId = crypto.randomUUID();
     c.set("requestId", requestId);
@@ -418,6 +441,21 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
     });
     c.set("lumoraError", (message: string, status = 400) => {
       return c.json({ ok: false, error: message, requestId: c.get("requestId") }, status as any);
+    });
+    c.set("ok", (data: unknown, meta?: Record<string, unknown>) => {
+      return c.json({ ok: true, data, meta, requestId: c.get("requestId") });
+    });
+    c.set("list", (rows: unknown[], meta: { total: number; page: number; pageSize: number; [key: string]: unknown }) => {
+      return c.json({ ok: true, data: rows, meta, requestId: c.get("requestId") });
+    });
+    c.set("created", (data: unknown) => {
+      return c.json({ ok: true, data, requestId: c.get("requestId") }, 201);
+    });
+    c.set("noContent", () => {
+      return new Response(null, { status: 204 });
+    });
+    c.set("fail", (code: string, message: string, status: number, details?: unknown) => {
+      return c.json({ ok: false, error: { code, message, details }, requestId: c.get("requestId") }, status as any);
     });
     const start = Date.now();
     await next();
@@ -479,10 +517,9 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
         return err instanceof Response ? err : errorResponse(String(err), 403, c.get("requestId"));
       });
       if (denied) return denied;
-      const page = Number(c.req.query("page") ?? 1);
-      const rawPageSize = c.req.query("pageSize") ?? c.req.query("limit");
-      const pageSize = Math.min(
-        Number(rawPageSize ?? resource.query?.defaultPageSize ?? 20),
+      const { page, pageSize } = parsePagination(
+        c,
+        resource.query?.defaultPageSize ?? 20,
         resource.query?.maxPageSize ?? 100
       );
       // LS-9: extract scope from auth for store-scoped resources
@@ -906,16 +943,60 @@ export async function initLumora(configOrPath: LumoraConfig | string): Promise<L
       return apiPrefix(config);
     },
     mountModule(path, router, options) {
-      if (options?.protected) {
+      if (options?.protected || options?.roles) {
         app.use(`${apiPrefix(config)}${path}/*`, async (c, next) => {
           const auth = await authorize(config, { kind: "resource", resource: "_module", fields: {} }, c).catch((err) => {
             logger.event("auth", String(err));
             return errorResponse(String(err), 401, c.get("requestId"));
           });
           if (auth instanceof Response) return auth;
+          
+          if (options.roles && options.roles.length > 0) {
+            const userRoles = auth?.roles ?? (auth?.claims?.roles as string[] | undefined) ?? [];
+            if (!userRoles.includes("super-admin") && !options.roles.some((r) => userRoles.includes(r))) {
+              return errorResponse("Forbidden", 403, c.get("requestId"));
+            }
+          }
           await next();
         });
       }
+
+      if (options?.rateLimit) {
+        const rlOpts = typeof options.rateLimit === "object" ? options.rateLimit : {};
+        const effectiveMax = (rlOpts as any).max ?? config.rateLimit.max;
+        const effectiveWindowMs = (rlOpts as any).windowMs ?? config.rateLimit.windowMs;
+        app.use(`${apiPrefix(config)}${path}/*`, rateLimit({
+          limit: effectiveMax,
+          windowMs: effectiveWindowMs,
+          store: rateLimitStore,
+        }));
+      }
+
+      if (options?.audit) {
+        app.use(`${apiPrefix(config)}${path}/*`, async (c, next) => {
+          await next();
+          if (c.req.method !== "GET" && c.res.status < 400) {
+             // Basic audit log for procedural mutation
+             const auth = c.get("user") as any;
+             let action: "create" | "update" | "delete" = "update";
+             if (c.req.method === "POST") action = "create";
+             else if (c.req.method === "DELETE") action = "delete";
+             await database.writeAuditLog({
+               resource: "_module",
+               action,
+               record_id: new URL(c.req.url).pathname,
+               actor_subject: auth?.subject ?? "anonymous",
+               actor_strategy: auth?.strategy ?? "procedural",
+               old_value: "{}",
+               new_value: "{}",
+               request_id: c.get("requestId"),
+               request_path: new URL(c.req.url).pathname,
+               timestamp: new Date().toISOString(),
+             }).catch(err => logger.error("audit", err, c.get("requestId")));
+          }
+        });
+      }
+
       app.route(`${apiPrefix(config)}${path}`, router);
       return this;
     },

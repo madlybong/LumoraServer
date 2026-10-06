@@ -15,3 +15,6 @@ export * from "./query";
 export * from "./migrations";
 export { LumoraDatabase } from "./db";
 export * from "./rate-limit";
+export * from "./errors";
+export * from "./utils";
+export * from "./middleware";

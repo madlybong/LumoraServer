@@ -17,3 +17,10 @@
 ## Release Flow
 - Do not manually publish.
 - Update `VERSION`, run `bun run release:prep`, and commit `chore(release): bump version to X.Y.Z`.
+
+## Procedural Endpoints (v0.8.9+)
+- Always use `mountModule(path, router, { protected: true, roles: ["admin"], audit: true, rateLimit: true })` for procedural APIs.
+- Use `validate` middleware to parse body/query payloads. Read parsed values from `c.var.valid`.
+- Return responses using `c.var.ok()`, `c.var.list()`, `c.var.created()`, and `c.var.fail()`.
+- Use `LumoraHttpError` for throwing expected HTTP errors.
+- Wrap lists in `ctx.db.page()` to respect `maxRows`.

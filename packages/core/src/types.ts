@@ -281,8 +281,8 @@ export type LumoraAuthConfig = {
  * ```
  */
 export type LumoraDatabaseConfig =
-  | { client: "sqlite"; url: string; autoBackup?: boolean }
-  | { client: "mysql"; url: string; autoBackup?: boolean }
+  | { client: "sqlite"; url: string; autoBackup?: boolean; maxRows?: number; onMaxRows?: "throw" | "truncate" | "warn"; statementTimeoutMs?: number }
+  | { client: "mysql"; url: string; autoBackup?: boolean; maxRows?: number; onMaxRows?: "throw" | "truncate" | "warn"; statementTimeoutMs?: number }
   | {
       client: "postgresql";
       url: string;
@@ -290,6 +290,9 @@ export type LumoraDatabaseConfig =
       pool?: { min?: number; max?: number; idleTimeout?: number };
       schema?: string;
       ssl?: boolean | { ca?: string; cert?: string; key?: string; rejectUnauthorized?: boolean };
+      maxRows?: number;
+      onMaxRows?: "throw" | "truncate" | "warn";
+      statementTimeoutMs?: number;
     };
 
 // LS-8: Scheduled tasks (Bun.cron-based, no external deps)
@@ -580,7 +583,7 @@ export interface LumoraInstance {
   /** All loaded resource definitions (inline or file-based). */
   resources: DefineResourceResult[];
   readonly apiPrefix: string;
-  mountModule(path: string, router: Hono<any>, options?: { protected?: boolean }): this;
+  mountModule(path: string, router: Hono<any>, options?: { protected?: boolean; roles?: string[]; rateLimit?: boolean | object; audit?: boolean }): this;
   shutdown(): Promise<void>;
   onShutdown(callback: () => Promise<void> | void): void;
   close(): Promise<void>;
@@ -609,12 +612,42 @@ export interface LumoraModuleContext {
   logAudit: (opts: AuditLogOpts, options?: { strict?: boolean }) => Promise<void> | void;
 }
 
+export interface LumoraPrincipal {
+  id: string;
+  subject: string;
+  roles: string[];
+  tenantId?: string;
+  claims?: Record<string, unknown>;
+}
+
+export interface LumoraEnvelope<T> {
+  ok: boolean;
+  data?: T;
+  meta?: Record<string, unknown>;
+  error?: {
+    code: string;
+    message: string;
+    details?: unknown;
+  };
+  requestId: string;
+}
+
 export type LumoraHonoVariables = {
-  user: Record<string, unknown>;
+  user: LumoraPrincipal;
   userRole: string;
   requestId: string;
   lumoraJson: <T>(data: T, status?: number) => Response;
   lumoraError: (message: string, status?: number) => Response;
+  ok: <T>(data: T, meta?: Record<string, unknown>) => Response;
+  list: <T>(rows: T[], meta: { total: number; page: number; pageSize: number; [key: string]: unknown }) => Response;
+  created: <T>(data: T) => Response;
+  noContent: () => Response;
+  fail: (code: string, message: string, status: number, details?: unknown) => Response;
+  valid?: {
+    json?: Record<string, unknown>;
+    query?: Record<string, string>;
+    params?: Record<string, string>;
+  };
 };
 
 export interface TypedEventEmitter<TMap extends object> {

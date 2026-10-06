@@ -221,16 +221,39 @@ export class LumoraDatabase {
   ) {
     if (config.client === "postgresql") {
       const pgSchema = config.schema && config.schema !== "public" ? config.schema : undefined;
+      const connectionParams: Record<string, string> = {};
+      if (pgSchema) connectionParams.search_path = pgSchema;
+      if (config.statementTimeoutMs) connectionParams.statement_timeout = String(config.statementTimeoutMs);
+
       this.sql = new SQL(config.url, {
         max:         config.pool?.max ?? 10,
         idleTimeout: config.pool?.idleTimeout ?? 30_000,
         ssl:         config.ssl ?? false,
-        // Use PostgreSQL startup parameters to set search_path per connection.
-        // This is the correct mechanism — no extra per-connection query needed.
-        ...(pgSchema ? { connection: { search_path: pgSchema } } : {}),
+        ...(Object.keys(connectionParams).length > 0 ? { connection: connectionParams } : {}),
       });
     } else {
       this.sql = new SQL(config.url, config.client === "mysql" ? { adapter: "mysql" } : { adapter: "sqlite" });
+    }
+
+    if (config.maxRows) {
+      const maxRows = config.maxRows;
+      const onMaxRows = config.onMaxRows ?? "throw";
+      const rawSql = this.sql;
+      this.sql = new Proxy(rawSql, {
+        apply: async (target, thisArg, args) => {
+          const result = await (target as any).apply(thisArg, args);
+          if (Array.isArray(result) && result.length > maxRows) {
+            if (onMaxRows === "throw") {
+              throw new Error(`Query returned ${result.length} rows, exceeding maxRows of ${maxRows}`);
+            } else if (onMaxRows === "truncate") {
+              result.length = maxRows;
+            } else if (onMaxRows === "warn") {
+              console.warn(`Query returned ${result.length} rows, exceeding maxRows of ${maxRows}`);
+            }
+          }
+          return result;
+        }
+      }) as unknown as SQL;
     }
   }
 
@@ -246,6 +269,42 @@ export class LumoraDatabase {
     const clone = Object.create(this) as LumoraDatabase;
     clone.tenantId = tenantId;
     return clone;
+  }
+
+  get tsql() {
+    return (strings: TemplateStringsArray, ...values: any[]) => {
+      if (!this.multiTenancy?.enabled || !this.tenantId) {
+        return this.sql(strings, ...values);
+      }
+      const field = this.multiTenancy.tenantIdField ?? "tenant_id";
+      return this.sql`${this.sql(strings, ...values)} AND ${this.sql(field)} = ${this.tenantId}`;
+    };
+  }
+
+  async page<T extends Record<string, unknown>>(
+    fragment: any,
+    opts: { page: number; pageSize: number; sort?: string; sortAllowList?: string[] }
+  ) {
+    const offset = (opts.page - 1) * opts.pageSize;
+    const countQuery = this.sql`SELECT COUNT(*) as total FROM (${fragment}) AS sub`;
+    const countResult = (await countQuery) as { total: number | string }[];
+    const total = Number(countResult[0]?.total ?? 0);
+    
+    let orderClause = this.sql``;
+    if (opts.sort && opts.sortAllowList?.length) {
+      const isDesc = opts.sort.startsWith("-");
+      const field = isDesc ? opts.sort.slice(1) : opts.sort;
+      if (opts.sortAllowList.includes(field)) {
+        orderClause = isDesc ? this.sql` ORDER BY ${this.sql(field)} DESC` : this.sql` ORDER BY ${this.sql(field)} ASC`;
+      }
+    }
+    
+    const dataQuery = this.sql`SELECT * FROM (${fragment}) AS sub ${orderClause} LIMIT ${opts.pageSize} OFFSET ${offset}`;
+    const data = (await dataQuery) as T[];
+    const totalPages = opts.pageSize > 0 ? Math.ceil(total / opts.pageSize) : 0;
+    const hasNextPage = opts.page < totalPages;
+    
+    return { total, page: opts.page, pageSize: opts.pageSize, totalPages, hasNextPage, data };
   }
 
   async ensureResource(resource: DefineResourceResult): Promise<void> {

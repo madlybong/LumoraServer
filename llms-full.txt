@@ -80,3 +80,41 @@ migrations: { dir: "./migrations", embeddedFiles: embedded }
 - **DO NOT** use `auth.type:`. Use `auth.mode:`.
 - **DO NOT** nest resource fields inside a `schema` property (e.g. `schema: { fields: {} }`). Use top-level `fields: {}`.
 - **DO NOT** assume realtime works out-of-the-box. You MUST set `realtime: { enabled: true }`.
+
+## Procedural APIs and Enterprise Guardrails (New in v0.8.9)
+
+Lumora extends its strict protections to procedural APIs mounted via `mountModule`.
+
+### mountModule Options
+`lumora.mountModule(path, router, options)` now supports:
+- `protected: boolean` - Requires standard JWT/Static auth.
+- `roles: string[]` - Checks that the user holds one of these roles (requires auth).
+- `rateLimit: boolean | object` - Applies the global or custom rate limit.
+- `audit: boolean` - Auto-audits mutations (POST/PUT/PATCH/DELETE) matching the `_module` resource schema.
+
+### Global Error Boundary
+A global `app.onError` catches unhandled exceptions. 
+Throw `LumoraHttpError` to surface controlled HTTP responses matching the standard `{ok, error, requestId}` envelope:
+```typescript
+import { LumoraHttpError } from "@astrake/lumora-server";
+throw new LumoraHttpError(403, "FORBIDDEN", "You cannot perform this action");
+```
+
+### Request Context Helpers (`c.var`)
+- **`c.var.user`**: Strictly typed as `LumoraPrincipal` (has `id`, `subject`, `roles`, etc.). Use `getPrincipal(c)` to safely extract it.
+- **Envelopes**: Use `c.var.ok(data)`, `c.var.list(data, meta)`, `c.var.created(data)`, `c.var.noContent()`, and `c.var.fail(code, msg, status)` to return standard Lumora JSON structures.
+
+### Validation Middleware
+Map standard schemas (Zod, Yup, etc.) directly to the error envelope:
+```typescript
+import { validate } from "@astrake/lumora-server";
+app.post("/action", validate({ json: z.object({ id: z.string() }) }), (c) => {
+  const data = c.var.valid.json;
+  return c.var.ok(data);
+});
+```
+
+### Database Helpers (`ctx.db`)
+- `ctx.db.page(fragment, { page, pageSize, sort, sortAllowList })`: Wraps SQL fragments with COUNT/LIMIT/OFFSET logic and returns `{ total, page, pageSize, totalPages, hasNextPage, data }`.
+- `ctx.db.tsql`: Tagged template literal that auto-appends tenant scoping rules for multi-tenant applications.
+- **Guardrails**: Global `maxRows` and `statementTimeoutMs` protect database connections from unbounded list operations.
