@@ -8,6 +8,19 @@
 
 ### Added
 
+- add procedural guardrails and response envelopes (`9ec00fb`)
+
+### Maintenance
+
+- bump version to 0.8.9 (`643e554`)
+
+
+---
+
+## [0.8.9] — 2026-10-06
+
+### Added
+
 - add procedural guardrails and response envelopes (`8aacccc`)
 
 ### Fixed
