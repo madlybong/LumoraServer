@@ -6,6 +6,15 @@
 
 ## [0.8.10] — 2026-10-07
 
+### Maintenance
+
+- bump version to 0.8.10 (`0023af4`)
+
+
+---
+
+## [0.8.10] — 2026-10-07
+
 ### Added
 
 - add procedural guardrails and response envelopes (`9ec00fb`)
