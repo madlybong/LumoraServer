@@ -264,6 +264,19 @@ async function authorize(
     const hookResult = await config.auth.afterVerify(authResult, c as any);
     if (hookResult instanceof Response) return hookResult;
   }
+  
+  if (authResult) {
+    const principal = {
+      id: authResult.subject,
+      subject: authResult.subject,
+      roles: authResult.roles ?? (authResult.claims?.roles as string[] | undefined) ?? [],
+      tenantId: (authResult.scope?.tenant_id ?? authResult.claims?.tenant_id) as string | undefined,
+      claims: authResult.claims
+    };
+    c.set("user", principal);
+    c.set("userRole", principal.roles[0] ?? "user");
+  }
+
   return authResult;
 }
 
