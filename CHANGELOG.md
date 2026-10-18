@@ -4,6 +4,87 @@
 
 ---
 
+## [0.9.0] — 2026-10-18
+
+### ⚠ Breaking & Behavioral Changes (`0.8.10` → `0.9.0`) & Consumer Migration Guide
+
+No existing public functions, classes, or config keys were removed or renamed. However, **10 runtime, SQL, and HTTP behaviors** were hardened in `v0.9.0`:
+
+1. **`mountModule()` Inherits Global `config.rateLimit` (`src/runtime.ts`):**
+   - **Previous (`0.8.10`):** `lumora.mountModule(path, router, options)` ignored global `config.rateLimit.enabled: true` unless `options.rateLimit` was explicitly passed.
+   - **Current (`0.9.0`):** Mounted sub-routers automatically inherit global `config.rateLimit` when `config.rateLimit.enabled` is `true` (and guard both `moduleBase` and `${moduleBase}/*`).
+   - **Migration:** Pass `{ rateLimit: false }` or `{ rateLimit: { disabled: true } }` to `mountModule()` on sub-routers that should bypass global rate limiting.
+2. **SQLite Connections Enable `PRAGMA foreign_keys = ON` and `WAL` by Default (`src/db.ts`):**
+   - **Previous (`0.8.10`):** `LumoraDatabase.connect()` did not execute SQLite `PRAGMA` statements (`foreign_keys` defaulted to `OFF`, `journal_mode` to `DELETE`).
+   - **Current (`0.9.0`):** `connect()` automatically executes `PRAGMA journal_mode = WAL` (`MEMORY` for `:memory:`), `PRAGMA busy_timeout = 5000`, `PRAGMA synchronous = NORMAL`, `PRAGMA foreign_keys = ON`, and `PRAGMA cache_size = -64000`.
+   - **Migration:** Ensure foreign key parent rows exist before inserting child rows, or override via `database: { client: "sqlite", url: "...", pragmas: { foreignKeys: false } }`.
+3. **`permissions.allowRecord` Enforced on Single-Record Routes & Early `404` on `PUT`/`PATCH` (`src/runtime.ts`):**
+   - **Previous (`0.8.10`):** `permissions.allowRecord` was declared in `types.ts` but never invoked at runtime. `PUT /:id` and `PATCH /:id` ran `hooks.beforeUpdate` before checking if the record existed.
+   - **Current (`0.9.0`):** `GET /:id`, `PUT /:id`, `PATCH /:id`, and `DELETE /:id` invoke `await resource.permissions.allowRecord(auth, record)` and return `403 Forbidden` when `false`. `PUT`/`PATCH /:id` checks record existence and returns `404 Not found` before invoking `hooks.beforeUpdate`.
+4. **`database.list()` Enforces `excludeFields`, `hidden`, and `multiTenancy` (`src/db.ts`):**
+   - **Previous (`0.8.10`):** `database.list()` ran `SELECT *` (ignoring `excludeFields` and `hidden`) and did not append `WHERE tenant_id = ...` when `this.tenantId` was set on the `LumoraDatabase` instance.
+   - **Current (`0.9.0`):** `database.list()` projects only non-hidden, non-excluded columns via `buildSelectClause()` and appends the `multiTenancy.tenantIdField` filter whenever `this.multiTenancy?.enabled && this.tenantId` is truthy.
+5. **Migration Checksum Verification in `status()` & `TRUNCATE` Blocked (`src/migrations.ts`):**
+   - **Previous (`0.8.10`):** `migrations.status()` (used in `production` `strict` mode) did not verify SHA-256 checksums of already-applied migrations when `pending.length === 0`. `blockDestructive` allowed `TRUNCATE`.
+   - **Current (`0.9.0`):** `migrations.status()` verifies SHA-256 checksums for all applied migrations and throws on mismatch even when `pending.length === 0`. `blockDestructive: true` now blocks `TRUNCATE`.
+6. **`GET /health` Executes Live DB `SELECT 1` Readiness Probe (`src/runtime.ts`):**
+   - **Previous (`0.8.10`):** `GET /health` returned static `200 OK` without querying the database.
+   - **Current (`0.9.0`):** `GET /health` and `GET /__lumora/health` execute `SELECT 1`, include `status`, `uptimeSeconds`, and `database: { status, client, latencyMs }`, and return HTTP `503` if the database is unreachable or closed.
+7. **OpenAPI `/events` and `/ws` Paths Gated on `realtime.enabled` (`src/docs.ts`):**
+   - **Previous (`0.8.10`):** `/__lumora/openapi.json` listed `/{resource}/events` and `/{resource}/ws` even when `realtime.enabled` was `false`.
+   - **Current (`0.9.0`):** `buildOpenApiDocument()` only includes SSE and WebSocket paths when `config.realtime.enabled === true`.
+8. **Realtime SSE `id:` Sequence Prefix & Tenant/Scope Isolation (`src/realtime.ts`):**
+   - **Previous (`0.8.10`):** SSE frames had no `id:` field, and resource SSE/WS broadcasts were delivered to all connected clients regardless of `tenantId` or `permissions.scope`.
+   - **Current (`0.9.0`):** SSE frames prepend `id: <seq>\n`, and `realtime.publish()` filters resource events by the subscriber's `tenantId` and `permissions.scope`.
+9. **Default Security Headers on All Responses (`src/runtime.ts`, `src/rate-limit.ts`):**
+   - **Current (`0.9.0`):** All responses include `X-Request-Id`, `X-Content-Type-Options: nosniff`, and `X-Frame-Options: DENY`. Rate-limited routes include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, and `Retry-After`.
+10. **Reserved `?since=` Delta Query Parameter & `mountModule({ audit: true })` Action Values (`src/db.ts`, `src/runtime.ts`):**
+    - **Current (`0.9.0`):** `?since=<ISO>` filters `updated_at >= since`. `mountModule({ audit: true })` writes normalized actions (`"create"`, `"update"`, `"delete"`) instead of raw HTTP verbs, and `writeAuditLog()` generates monotonic UUIDv7 IDs.
+
+### Added
+
+- **RFC-01 (Custom Auth, Dual-Token Rotation & Claim Mapping):** Added `auth.mode: "custom"` (`verify(c)` + `afterVerify`), `auth.publicPaths`, JWT `claimMapping` (`subject`, `roles`, `tenantId`, `scopes`), `refreshSecret`, `signLumoraJwt()`, and `rotateLumoraTokens()` (`400120f`).
+- **RFC-02 (Enterprise SQLite Pragmas):** Added automatic SQLite `WAL`, `busy_timeout = 5000`, `synchronous = NORMAL`, `foreign_keys = ON`, `cache_size = -64000` on `connect()`, configurable via `database.pragmas`, plus `PRAGMA wal_checkpoint(TRUNCATE)` on `close()` (`400120f`).
+- **RFC-03 (Atomic SQLite Backups & Restore):** Upgraded `backupSqliteDatabase()` with atomic `VACUUM INTO`, `maxRetainedBackups` retention pruning, and `restoreSqliteBackup()` auto-restore on migration failure (`400120f`).
+- **RFC-04 (Rate Limiting & Security Headers):** Added global `config.rateLimit` inheritance on `mountModule()`, memory store TTL key pruning, `X-RateLimit-*` / `Retry-After` headers, and baseline security headers (`400120f`).
+- **RFC-05 (Cryptographic SHA-256 Hash-Chained Audit Ledger):** Added opt-in hash chaining (`auditHashChain`, `audit: { hashChain: true }`) across SQLite, MySQL, and PostgreSQL with `tenant_id`, `previous_hash`, `chained_hash`, `canonicalJson()`, UUIDv7 IDs, and `database.verifyAuditChain(tenantId?)` (`400120f`).
+- **RFC-06 (Tenant-Partitioned Realtime, Heartbeats & Replay):** Added `realtime.publishToTenant()`, `realtime.createTenantSseResponse()`, automatic tenant/scope filtering on resource SSE/WS streams, configurable `: ping\n\n` heartbeats (`heartbeatIntervalMs`), and `Last-Event-ID` ring-buffer replay (`maxReplayBuffer`) (`400120f`).
+- **RFC-07 (Sub-Router OpenAPI 3.1.0 Introspection):** Re-exported `OpenAPIHono`, `createRoute`, and `z` from `@hono/zod-openapi` and added automatic sub-router OpenAPI 3.1.0 + Hono `router.routes` merging in `mountModule()` (`400120f`).
+- **RFC-08 (Declarative Governance Middlewares):** Enforced `permissions.allowRecord` on single-record CRUD routes and exported `requirePolicy()`, `enforceSoD()`, `requireThreshold()`, and `requireTimeWindow()` middlewares (`400120f`).
+- **RFC-09 (Delta Sync Queries & Idempotency Middleware):** Added `?since=<ISO>` delta query support, built-in `id`/`created_at`/`updated_at` filtering, and exported `idempotency()` middleware with memory and database (`_idempotency_keys`) stores and SHA-256 payload conflict detection (`400120f`).
+- **RFC-10 (Observability & Graceful Drain):** Upgraded `/health` and `/__lumora/health` with live DB `SELECT 1` latency probes, added `/__lumora/metrics` (JSON & Prometheus exposition formats), and added `lumora.stop()` / `lumora.shutdown()` graceful drain for cron jobs, SSE/WS streams, and SQLite WAL checkpoints (`400120f`).
+
+### Fixed
+
+- Enforced `resource.excludeFields` and `field.hidden` SQL projection in `LumoraDatabase.list()` (`400120f`).
+- Enforced `multiTenancy` tenant filtering on direct `LumoraDatabase.list()` calls (`400120f`).
+- Removed PostgreSQL's restrictive `_audit_logs_action_check` constraint so custom procedural audit actions succeed on PostgreSQL (`400120f`).
+- Escaped single quotes and awaited table initialization in `PostgresRateLimitStore.increment()` (`400120f`).
+- Added expired-entry pruning to `MemoryRateLimitStore` to prevent unbounded memory growth (`400120f`).
+- Typed `c.var.ok`, `c.var.list`, and `c.var.created` in `LumoraHonoVariables` with Hono's `TypedResponse` for `OpenAPIHono.openapi()` compatibility (`400120f`).
+
+### File-by-File Changelog (`packages/core`)
+
+| File | Summary of Changes (`0.8.10` → `0.9.0`) |
+| :--- | :--- |
+| `packages/core/package.json` | Added `@hono/zod-openapi@^1.6.3` and `zod@^4.6.7` dependencies; bundled `llms.txt`, `llms-full.txt`, and `AGENTS.md` alongside `README.md` and `CHANGELOG.md` in `files` and `prepack`/`postpack`. |
+| `packages/core/src/types.ts` | Added `JwtClaimMapping`, `SqlitePragmasConfig`, `auth.mode: "custom"`, `publicPaths`, `refreshSecret`, `auditHashChain`, `MountModuleOptions`, `AuditChainVerifyResult`, `stop()`, `c.var.db`, `c.var.logAudit`, and `TypedResponse` return types on `c.var.ok`/`list`/`created`. |
+| `packages/core/src/config.ts` | Resolved `realtime.heartbeatIntervalMs` (default `25000`) and `realtime.maxReplayBuffer` (default `100`); validated `auth.mode: "custom"` requires a `verify` function while keeping `auth.mode: "disabled"` blocked in `production`. |
+| `packages/core/src/auth.ts` | Added `signLumoraJwt()`, `rotateLumoraTokens()`, `claimMapping` extraction (`subject`, `roles`, `tenantId`, `scopes`), `auth.mode: "custom"` execution in `resolveAuthFromContext()`, and issuer/audience options in `verifyJwtToken()`. |
+| `packages/core/src/db.ts` | Added SQLite connection pragmas (`connect()`) and WAL checkpoint (`close()`), `?since=` delta filtering, `id`/`created_at`/`updated_at` filtering & sort normalization, `excludeFields` projection, `list()` multi-tenancy scoping, UUIDv7 `monotonicUuid()`, `canonicalJson()`, SHA-256 hash-chained `writeAuditLog()`, and `verifyAuditChain()`. |
+| `packages/core/src/sqlite-backup.ts` | Added `SqliteBackupOptions`, atomic `VACUUM INTO` backup execution with `copyFile` fallback, `maxRetainedBackups` pruning, and `restoreSqliteBackup()`. |
+| `packages/core/src/migrations.ts` | Added SHA-256 checksum verification for applied migrations in `status()`, `TRUNCATE` detection in `blockDestructive`, and automatic SQLite backup restore in `applyPending()` on migration failure. |
+| `packages/core/src/rate-limit.ts` | Added periodic expired-key pruning in `MemoryRateLimitStore`, `initPromise` awaiting and SQL escaping in `PostgresRateLimitStore`, and `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, and `Retry-After` response headers. |
+| `packages/core/src/middleware.ts` | Added governance middlewares (`requirePolicy`, `enforceSoD`, `requireThreshold`, `requireTimeWindow`) and `idempotency()` middleware with `MemoryIdempotencyStore` and database `_idempotency_keys` store. |
+| `packages/core/src/realtime.ts` | Added `publishToTenant()`, `createTenantSseResponse()`, `close()`, SSE `: ping\n\n` heartbeats, `Last-Event-ID` ring-buffer replay, monotonic `id:` sequence numbers, and tenant/scope filtering on resource SSE/WebSocket streams. |
+| `packages/core/src/docs.ts` | Gated `/{resource}/events` and `/{resource}/ws` paths in `buildOpenApiDocument()` on `config.realtime.enabled`. |
+| `packages/core/src/scheduler.ts` | Tracked in-flight cron job promises and updated `SchedulerHandle.stop()` to `Promise<void>` awaiting `Promise.allSettled(inFlight)`. |
+| `packages/core/src/runtime.ts` | Wired `afterVerify` across all auth modes, `publicPaths` exemptions, `c.var.db`/`c.var.logAudit`, global security headers, `permissions.allowRecord` enforcement, `mountModule` rate-limit inheritance & OpenAPI 3.1.0 introspection, `/__lumora/health`, `/__lumora/metrics`, and `stop()`/`shutdown()`. |
+| `packages/core/src/index.ts` | Exported `OpenAPIHono`, `createRoute`, `z`, `backupSqliteDatabase`, `restoreSqliteBackup`, and all new auth/governance/idempotency utilities. |
+| `packages/core/src/init-wizard.ts` | Updated generated `.cursorrules` and `llms.txt` in `scaffoldLumoraProject()` with `v0.9.0` procedural, governance, and OpenAPI guardrails. |
+
+---
+
 ## [0.8.10] — 2026-10-07
 
 ### Maintenance
@@ -35,7 +116,6 @@
 - update CHANGELOG for v0.8.5 (`292a877`)
 - bump version to 0.8.5 (`de1324a`)
 
-
 ---
 
 ## [0.8.9] — 2026-10-06
@@ -47,62 +127,6 @@
 ### Maintenance
 
 - bump version to 0.8.9 (`643e554`)
-
-
----
-
-## [0.8.9] — 2026-10-06
-
-### Added
-
-- add procedural guardrails and response envelopes (`8aacccc`)
-
-### Fixed
-
-- resolve CodeQL and Dependabot alerts (`03ebcb3`)
-
-### Maintenance
-
-- bump version to 0.8.8 (`78e9f59`)
-- update CHANGELOG for v0.8.7 (`9cda126`)
-- bump version to 0.8.7 (`c271d5f`)
-- update CHANGELOG for v0.8.6 (`55e17da`)
-- bump version to 0.8.6 (`80a1aae`)
-- update CHANGELOG for v0.8.5 (`292a877`)
-- bump version to 0.8.5 (`de1324a`)
-
-
----
-
-## [0.8.9] — 2026-10-06
-
-### Fixed
-
-- resolve CodeQL and Dependabot alerts (`03ebcb3`)
-
-### Maintenance
-
-- bump version to 0.8.8 (`78e9f59`)
-- update CHANGELOG for v0.8.7 (`9cda126`)
-- bump version to 0.8.7 (`c271d5f`)
-- update CHANGELOG for v0.8.6 (`55e17da`)
-- bump version to 0.8.6 (`80a1aae`)
-- update CHANGELOG for v0.8.5 (`292a877`)
-- bump version to 0.8.5 (`de1324a`)
-
-
----
-
-## [0.8.8] — 2026-09-13
-
-### Fixed
-
-- resolve CodeQL and Dependabot alerts (`03ebcb3`)
-
-### Maintenance
-
-- bump version to 0.8.8 (`78e9f59`)
-
 
 ---
 
@@ -128,29 +152,13 @@
 
 ## [0.8.7] — 2026-09-13
 
-### Maintenance
-
-- bump version to 0.8.7 (`c271d5f`)
-
-
----
-
-## [0.8.7] — 2026-09-13
-
 ### Fixed
 
 - Remove `npm config set` from release workflow to fix `ENOWORKSPACES` error when publishing from workspace folder (`packages/core`)
 
-
-
----
-
-## [0.8.6] — 2026-09-13
-
 ### Maintenance
 
-- bump version to 0.8.6 (`80a1aae`)
-
+- bump version to 0.8.7 (`c271d5f`)
 
 ---
 
@@ -159,17 +167,7 @@
 ### Maintenance
 
 - Test release to verify the updated NPM authentication token in the CI pipeline
-
-
-
----
-
-## [0.8.5] — 2026-09-13
-
-### Maintenance
-
-- bump version to 0.8.5 (`de1324a`)
-
+- bump version to 0.8.6 (`80a1aae`)
 
 ---
 
@@ -181,6 +179,9 @@
 - fix starter build resolution for hono dependency
 - add unified validation script (`bun run validate`) for CI parity
 
+### Maintenance
+
+- bump version to 0.8.5 (`de1324a`)
 
 ---
 

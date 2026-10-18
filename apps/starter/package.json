@@ -1,6 +1,6 @@
 {
   "name": "@lumora/starter",
-  "version": "0.8.10",
+  "version": "0.9.0",
   "type": "module",
   "main": "./src/index.ts",
   "scripts": {

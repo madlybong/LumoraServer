@@ -1,6 +1,6 @@
 {
   "name": "@astrake/lumora-server",
-  "version": "0.8.10",
+  "version": "0.9.0",
   "description": "Slim Bun + Hono framework — typed config, file-based resources, auto-generated REST/SSE/WebSocket endpoints, JWT auth, SQLite, and an interactive init wizard.",
   "author": "Anuvab Chakraborty (https://github.com/madlybong)",
   "license": "MIT",
@@ -48,18 +48,23 @@
   "files": [
     "dist",
     "README.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "llms.txt",
+    "llms-full.txt",
+    "AGENTS.md"
   ],
   "scripts": {
-    "prepack": "bun -e \"await Bun.write('README.md', await Bun.file('../../README.md').text()); await Bun.write('CHANGELOG.md', await Bun.file('../../CHANGELOG.md').text())\"",
-    "postpack": "bun -e \"import { unlinkSync } from 'fs'; try { unlinkSync('README.md') } catch(e){} try { unlinkSync('CHANGELOG.md') } catch(e){}\"",
+    "prepack": "bun -e \"for (const f of ['README.md','CHANGELOG.md','llms.txt','llms-full.txt','AGENTS.md']) await Bun.write(f, await Bun.file('../../' + f).text())\"",
+    "postpack": "bun -e \"import { unlinkSync } from 'fs'; for (const f of ['README.md','CHANGELOG.md','llms.txt','llms-full.txt','AGENTS.md']) { try { unlinkSync(f) } catch(e){} }\"",
     "build": "bun -e \"import { rmSync } from 'fs'; try { rmSync('dist', { recursive: true }) } catch(e) {} \" && tsc -p tsconfig.build.json && bun build ./src/index.ts ./bin/init.ts --outdir ./dist --target bun --packages external",
     "check": "tsc -p ./tsconfig.json",
     "typecheck": "tsc -p ./tsconfig.strict.json"
   },
   "dependencies": {
+    "@hono/zod-openapi": "^1.6.3",
     "hono": "^4.9.7",
-    "nodemailer": "^10.0.9"
+    "nodemailer": "^10.0.9",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/nodemailer": "^8.0.0",

@@ -33,7 +33,7 @@ my-lumora-backend/
 
 ### 1. Separation of Resources vs. Routes
 - **`src/resources/`**: Exclusively for `defineResource()` definitions. These map 1:1 with database tables and automatically generate REST, SSE, and WebSocket endpoints. AI agents know that files here are purely declarative.
-- **`src/routes/`**: Exclusively for standard Hono route definitions (e.g., Stripe webhooks, complex multi-step OAuth, file proxying). Users attach these directly to the Hono instance (`lumora.app.route(...)`) in `src/index.ts`. AI agents know that files here are imperative logic.
+- **`src/routes/`**: Exclusively for procedural Hono / `OpenAPIHono` route modules (e.g., Stripe webhooks, complex multi-step workflows, custom auth). Attach these in `src/index.ts` via `lumora.mountModule("/prefix", router, { protected: true, roles: [...], rateLimit: true, audit: true })` so they automatically inherit Lumora's context (`c.var.lumora`, `c.var.ok/list/created`), rate limiting, audit trails, and OpenAPI 3.1.0 introspection. AI agents know that files here are imperative logic.
 
 ### 2. Services Layer
 Business logic should not be tightly coupled to Lumora resource hooks. If a resource hook (`afterInsert`) needs to send a welcome email, it should call `emailService.sendWelcome()` from the `src/services/` directory. This keeps schemas clean and logic highly testable.

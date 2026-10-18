@@ -57,11 +57,33 @@ The following capabilities landed across the v0.3.0–v0.5.0 releases:
 
 ---
 
+## Shipped in v0.8.9 – v0.8.10
+
+- Procedural route guardrails (`validate`, `c.var.ok/list/created`, `LumoraHttpError`, `db.page`).
+- Secure `mountModule` options (`protected`, `roles`, `rateLimit`, `audit`).
+- Multi-database transaction pooling (`AsyncLocalStorage`) and hardened PostgreSQL integration suite.
+
+---
+
+## Shipped in v0.9.0
+
+- **RFC-01** Custom auth verifier (`auth.mode: "custom"`), `allowInProduction` for disabled auth, dual-token access + refresh rotation (`issueTokenPair`, `rotateTokens`, `revokeToken` via `_auth_refresh_tokens`), and `claimMapping` for multi-axis tenant/scope claims.
+- **RFC-02** External database connection mode (`connectionMode: "external"`, `externalClient`) and automatic enterprise SQLite pragmas (`WAL`, `busy_timeout = 5000`, `synchronous = NORMAL`, `foreign_keys = ON`).
+- **RFC-03** Drizzle Kit `_journal.json` migration loader (`drizzleJournal: true`) and atomic SQLite `VACUUM INTO` pre-migration backup with automatic file-copy rollback on migration failure.
+- **RFC-04** Global HTTP pipeline middleware (`config.compression`, `config.etag`, `config.securityHeaders`) and global rate limiting across all mounted sub-routers.
+- **RFC-05** Cryptographic SHA-256 hash-chained audit ledger (`chained_hash`, `previous_hash`, `changed_fields`, `canonicalJson`, `verifyAuditChain(db, tenantId)`).
+- **RFC-06** Tenant-partitioned realtime channels (`publishToTenant`), SSE heartbeat comments (`heartbeatIntervalMs: 25000`), and ring-buffer `Last-Event-ID` replay (`maxReplayBuffer: 100`).
+- **RFC-07** Sub-router OpenAPI 3.1.0 merging via `mountModule(prefix, router, { openApi })` and automatic `@hono/zod-openapi` (`OpenAPIHono`) introspection.
+- **RFC-08** Declarative governance policy engine (`definePolicy`, `evaluatePolicy`, `assertPolicy`) for Segregation of Duties (SoD), monetary delegation thresholds (DoFP), and temporal period locks.
+- **RFC-09** Offline-first idempotent mutation sync engine (`lumora.sync.processBatch` backed by `_sync_mutation_logs` with SHA-256 payload conflict detection and `?updated_since=` delta bootstrap).
+- **RFC-10** Deep database readiness probe (`/__lumora/health` with `SELECT 1` latency), Prometheus + JSON telemetry (`/__lumora/metrics`), and idempotent graceful shutdown (`lumora.stop()`).
+
+---
+
 ## Near term
 
-- polish the `bunx init @astrake/lumora-server` experience
+- polish the `bunx @astrake/lumora-server init` experience
 - improve generated docs UI beyond the current simple dev page
-- strengthen JWT validation ergonomics (refresh tokens, revocation)
 - add more runtime benchmarks and performance tuning guides
 
 ## Mid term

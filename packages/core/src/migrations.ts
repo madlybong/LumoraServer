@@ -4,7 +4,7 @@ import path from "node:path";
 import type { LumoraDatabase, MigrationRecord } from "./db";
 import type { ResolvedLumoraConfig } from "./types";
 import type { LumoraLogger } from "./logger";
-import { backupSqliteDatabase } from "./sqlite-backup";
+import { backupSqliteDatabase, restoreSqliteBackup } from "./sqlite-backup";
 
 export interface MigrationStatus {
   applied: MigrationRecord[];
@@ -75,13 +75,21 @@ export class LumoraMigrationEngine {
     const applied = await this.db.getAppliedMigrations();
     const appliedNames = new Set(applied.map((r) => r.name));
     const files = await this.discoverMigrations();
-    const fileStems = new Set(files.map((f) => path.basename(f.name, ".sql")));
+    const fileMap = new Map(files.map((f) => [path.basename(f.name, ".sql"), f.content]));
 
-    if (!this.config.migrations.allowDowngrade) {
-      for (const appliedMigration of applied) {
-        if (!fileStems.has(appliedMigration.name)) {
-          throw new Error(`[lumora] Forward-only guard failed: Migration "${appliedMigration.name}" was applied to the database, but is missing from the local filesystem. Downgrades are blocked by config.migrations.allowDowngrade.`);
+    for (const appliedMigration of applied) {
+      if (fileMap.has(appliedMigration.name)) {
+        const content = fileMap.get(appliedMigration.name)!;
+        const checksum = sha256(content);
+        if (checksum !== appliedMigration.checksum) {
+          throw new Error(
+            `[lumora] Migration "${appliedMigration.name}" checksum mismatch (expected ${appliedMigration.checksum}, got ${checksum}). Editing applied migrations is prohibited.`
+          );
         }
+      } else if (!this.config.migrations.allowDowngrade) {
+        throw new Error(
+          `[lumora] Forward-only guard failed: Migration "${appliedMigration.name}" was applied to the database, but is missing from the local filesystem. Downgrades are blocked by config.migrations.allowDowngrade.`
+        );
       }
     }
 
@@ -104,8 +112,12 @@ export class LumoraMigrationEngine {
     const files = await this.discoverMigrations();
     const pendingFiles = files.filter((f) => !appliedMap.has(path.basename(f.name, ".sql")));
 
+    let backupPath: string | undefined;
     if (pendingFiles.length > 0 && this.config.database.client === "sqlite" && this.config.database.autoBackup && !opts.dryRun) {
-      await backupSqliteDatabase(this.config.database.url, this.logger);
+      backupPath = await backupSqliteDatabase(this.config.database.url, this.logger, {
+        sql: this.db.sql,
+        maxRetainedBackups: this.config.database.maxRetainedBackups,
+      });
     }
 
     const results: MigrationApplyResult[] = [];
@@ -114,7 +126,6 @@ export class LumoraMigrationEngine {
       const stem = path.basename(file.name, ".sql");
       const content = file.content;
       if (appliedMap.has(stem)) {
-        // Already applied — optionally warn on checksum drift
         const existing = appliedMap.get(stem)!;
         const checksum = sha256(content);
         if (checksum !== existing.checksum) {
@@ -127,7 +138,7 @@ export class LumoraMigrationEngine {
 
       if (this.config.migrations.blockDestructive) {
         const u = content.toUpperCase();
-        if (u.includes("DROP TABLE") || u.includes("DROP COLUMN") || u.includes("DELETE FROM")) {
+        if (u.includes("DROP TABLE") || u.includes("DROP COLUMN") || u.includes("TRUNCATE") || u.includes("DELETE FROM")) {
           throw new Error(`[lumora] Destructive operation detected in "${stem}". This is blocked by config.migrations.blockDestructive.`);
         }
       }
@@ -148,6 +159,13 @@ export class LumoraMigrationEngine {
         const errMsg = String(error);
         this.logger?.event("migrate:error", `✗ ${stem}: ${errMsg}`);
         results.push({ name: stem, success: false, error: errMsg });
+        if (backupPath && this.config.database.client === "sqlite") {
+          try {
+            await this.db.close();
+            await restoreSqliteBackup(this.config.database.url, backupPath, this.logger);
+            await this.db.connect();
+          } catch {}
+        }
         throw new Error(`[lumora] Migration "${stem}" failed: ${errMsg}`);
       }
     }

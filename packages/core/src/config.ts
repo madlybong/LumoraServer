@@ -70,7 +70,9 @@ export function resolveLumoraConfig(config: LumoraConfig, rootDir: string): Reso
     realtime: {
       enabled: config.realtime?.enabled ?? false,
       sseSuffix: config.realtime?.sseSuffix ?? "events",
-      websocketSuffix: config.realtime?.websocketSuffix ?? "ws"
+      websocketSuffix: config.realtime?.websocketSuffix ?? "ws",
+      heartbeatIntervalMs: config.realtime?.heartbeatIntervalMs ?? 25_000,
+      maxReplayBuffer: config.realtime?.maxReplayBuffer ?? 100
     },
     logging: {
       level: config.logging?.level ?? (
@@ -127,5 +129,9 @@ export function validateAuth(mode: LumoraConfig["mode"], auth: LumoraAuthConfig)
 
   if (auth.mode === "jwt" && !auth.secret) {
     throw new Error("JWT auth requires a secret.");
+  }
+
+  if (auth.mode === "custom" && typeof auth.verify !== "function") {
+    throw new Error("Custom auth requires a verify function.");
   }
 }

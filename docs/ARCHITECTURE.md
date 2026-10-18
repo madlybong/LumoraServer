@@ -53,9 +53,16 @@ The returned runtime instance exposes:
 - `fetch`
 - `websocket`
 - `config`
+- `database`
 - `events`
 - `realtime`
 - `docs`
+- `query`
+- `resources`
+- `apiPrefix`
+- `mountModule(path, router, options?)`
+- `shutdown()` / `stop()`
+- `onShutdown(callback)`
 - `close()`
 
 ## Resource model
@@ -69,6 +76,8 @@ A resource can define:
 - `fields`
 - `auth`
 - `query`
+- `permissions`
+- `audit`
 - `hooks`
 - `meta`
 
@@ -78,9 +87,10 @@ The runtime uses that schema to generate:
 - `GET /{base}/{version}/{resource}/:id`
 - `POST /{base}/{version}/{resource}`
 - `PUT /{base}/{version}/{resource}/:id`
+- `PATCH /{base}/{version}/{resource}/:id`
 - `DELETE /{base}/{version}/{resource}/:id`
-- `GET /{base}/{version}/{resource}/events`
-- `GET /{base}/{version}/{resource}/ws`
+- `GET /{base}/{version}/{resource}/events` *(when `realtime.enabled: true`)*
+- `GET /{base}/{version}/{resource}/ws` *(when `realtime.enabled: true`)*
 
 ## Auth model
 
@@ -88,7 +98,7 @@ Auth is intentionally environment-sensitive:
 
 - development can use `disabled`
 - production must not use `disabled`
-- supported production strategies are `static` and `jwt`
+- supported production strategies are `static`, `jwt`, and `custom`
 
 Resource auth can override behavior with:
 
@@ -96,19 +106,18 @@ Resource auth can override behavior with:
 - `public`
 - `protected`
 
-**Custom Claims & Hooks**:
-With v0.8.2 (`LP-04`), JWT authentication supports custom claims extraction and an `afterVerify` hook. This enables token evaluation workflows (e.g. enforcing token freshness, checking against a denylist, or mapping `tenant_id` from custom headers) before yielding the authentication context.
+**Custom Auth, Claim Mapping & Dual-Token Rotation (`RFC-01` / `LP-04`)**:
+- `auth.mode: "custom"` accepts a `verify(c) => Promise<LumoraAuthResult | null>` callback, allowing host applications with custom session/TOTP/OAuth middleware to run in `production` mode while participating in Lumora's `afterVerify`, `protectedPaths`, `publicPaths`, and `permissions` pipeline.
+- `auth.mode: "jwt"` supports `claimMapping` (`subject`, `roles`, `tenantId`, and multi-axis `scopes`), `refreshSecret`, and exported helpers `signLumoraJwt()` and `rotateLumoraTokens()`.
 
 ## DB model
 
 The current runtime assumes DB-backed resources. The implementation is intentionally slim:
 
-- SQLite, MySQL, and PostgreSQL (`bun:postgres`) config shapes are first-class.
+- SQLite, MySQL, and PostgreSQL (`bun:sql`) config shapes are first-class.
 - PostgreSQL adapter explicitly supports connection pooling (`pool: { min, max }`), `schema` definitions (mapped to `search_path`), and TLS/SSL configurations.
-- table creation is automatic per discovered resource
-- CRUD is generated directly from resource fields
-- transactions emit before/after/rollback events
-- **SQLite Auto-Backup (`LP-02`)**: When using SQLite in production, `database.autoBackup: true` automatically shadows the primary database file to a `.bak` timestamped copy immediately before applying any pending migrations.
+- **Enterprise SQLite Pragmas (`RFC-02`)**: On connection initialization for non-memory SQLite databases, Lumora automatically applies `PRAGMA journal_mode = WAL`, `PRAGMA busy_timeout = 5000`, `PRAGMA synchronous = NORMAL`, `PRAGMA foreign_keys = ON`, and `PRAGMA cache_size = -64000` (all configurable via `database.pragmas`). On shutdown, Lumora runs `PRAGMA wal_checkpoint(TRUNCATE)`.
+- **Atomic SQLite Auto-Backup & Restore (`RFC-03` / `LP-02`)**: When `database.autoBackup: true` is enabled, Lumora executes an atomic `VACUUM INTO` snapshot (falling back to file + `-wal`/`-shm` copy), prunes old backups via `maxRetainedBackups`, and automatically restores the pre-migration snapshot if a migration fails.
 
 This is not an ORM layer. The resource DSL is smaller and more constrained by design.
 
@@ -123,29 +132,31 @@ Lumora keeps one resource event model across:
 
 That lets the parent app subscribe once and react consistently across transports.
 
-**Opt-in Mounting (`LP-05`)**: By default, `/events` (SSE) and `/ws` (WebSockets) routes are not mounted. They must be explicitly enabled via `realtime: { enabled: true }` in `lumora.config.ts`. This prevents idle WebSocket upgrades when realtime features are not required.
+**Opt-in Mounting, Tenant Isolation, Heartbeats & Replay (`RFC-06` / `LP-05`)**:
+- By default, `/events` (SSE) and `/ws` (WebSockets) routes are not mounted unless `realtime: { enabled: true }` is set in `lumora.config.ts`.
+- Supports tenant-partitioned channels via `lumora.realtime.publishToTenant(tenantId, event, payload)` and `createTenantSseResponse(tenantId, channel, c?, options?)`.
+- Resource SSE and WebSocket streams automatically filter events by the subscriber's `tenantId` and `permissions.scope.field`.
+- Configurable SSE keep-alive heartbeat comments (`: ping\n\n` via `heartbeatIntervalMs`, default `25000ms`) and ring-buffer event replay via `Last-Event-ID` (`maxReplayBuffer`, default `100`).
 
 ## Docs model
 
-In development, Lumora can expose:
+In development (or when `docs.enabled: true`), Lumora exposes:
 
-- an OpenAPI JSON document
-- a simple docs UI route
+- an OpenAPI 3.1.0 JSON document (`/__lumora/openapi.json`)
+- a simple docs UI route (`/__lumora/docs`)
 
-Docs are generated from resolved config and discovered resource definitions. There is no separate docs source of truth.
+**Sub-Router OpenAPI Introspection (`RFC-07`)**:
+`lumora.mountModule(prefix, router, options)` automatically introspects both `@hono/zod-openapi` (`OpenAPIHono`) sub-routers and standard `Hono` sub-routers (`router.routes`), merging their paths, parameters, security schemes, and tags into `/__lumora/openapi.json`.
 
-## Future boundary
+## Rate Limiting & Security Headers
 
-Administrator UI is not implemented yet. Current resource metadata and config fields only reserve the extension points needed for future attachment.
-
-## Rate Limiting
-
-Lumora v0.8.0 introduced a robust API rate limiting subsystem:
+Lumora provides a built-in API rate limiting subsystem (`RFC-04`):
 
 - Controlled via `rateLimit` config block (`enabled`, `windowMs`, `max`, `store`).
-- Includes a pluggable `RateLimitStore` interface.
-- Built-in stores include `"memory"` for single-instance or development environments and `"database"` (currently PostgreSQL only via `lumora_rate_limits` table) for horizontal scaling.
-- Can be disabled/overridden per resource block.
+- Built-in stores include `"memory"` (with automatic expired-key eviction) and `"database"` (PostgreSQL `lumora_rate_limits` table).
+- Emits standard `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, and `Retry-After` headers.
+- Automatically inherited by sub-routers mounted via `mountModule()` when `config.rateLimit.enabled` is true (unless explicitly opted out with `rateLimit: false`).
+- Global middleware emits baseline security headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-Request-Id`).
 
 ## Task Scheduling (Cron)
 
@@ -153,14 +164,11 @@ Lumora provides a declarative scheduling framework for background tasks:
 
 - Configured directly inside `lumora.config.ts` via the `schedule` array.
 - Uses `Bun.cron` under the hood.
-- A centralized internal execution context injects database access (`ctx.db`), logging (`ctx.log`), and `ctx.error` handling.
-- When `log: true` is configured, task runs automatically write execution records (start, end, error trace) into a dynamically generated `lumora_cron_log` table.
-
-Migrating schema, tracking cron executions, and scoping tenant identifiers form the bedrock of the 0.8 upgrade abstractions.
+- Tracks in-flight executions so `lumora.stop()` / `lumora.shutdown()` gracefully awaits active cron jobs before closing the database.
 
 ## Migration model
 
-Lumora ships a file-based, mode-aware migration engine. No ORM, no migration DSL — plain SQL files that are version-tracked in a `_migrations` ledger table.
+Lumora ships a file-based and SFE-compatible, mode-aware migration engine. No ORM, no migration DSL — plain SQL files that are version-tracked in a `_migrations` ledger table with SHA-256 checksum verification across both `status()` and `applyPending()`.
 
 ### File naming
 
@@ -168,87 +176,34 @@ Lumora ships a file-based, mode-aware migration engine. No ORM, no migration DSL
 YYYYMMDD_NNN_description.sql
 ```
 
-Example:
-```
-migrations/
-  20260524_001_initial_schema.sql
-  20260524_002_add_user_email_index.sql
-  20260601_001_add_product_table.sql
-```
-
-Files are applied in lexicographic order. The date prefix guarantees chronological ordering across parallel branches.
-
-### Ledger table
-
-Each applied migration is recorded in `_migrations`:
-
-| column       | type   | description                         |
-|---|---|---|
-| `id`         | int    | auto-increment                      |
-| `name`       | text   | filename stem (without `.sql`)      |
-| `checksum`   | text   | SHA-256 of file content             |
-| `applied_at` | text   | ISO timestamp of apply              |
-
 ### Mode-aware behavior
 
 | `config.mode`   | Default `migrations.mode` | Startup behavior                                          |
 |---|---|---|
 | `development`   | `"auto"`                  | Apply pending migrations on startup (schema changed or fresh start) |
-| `production`    | `"strict"`                | Fail startup if any pending migration exists             |
+| `production`    | `"strict"`                | Fail startup if any pending migration exists or if any applied checksum mismatches |
 | `test`          | `"off"`                   | Skip engine entirely — no FS reads, no table creation    |
 
-Override with `migrations.mode` in `lumora.config.ts`.
+### Production Safety (`RFC-03` / `LP-03`)
 
-### CLI commands
+In production mode, `migrations.blockDestructive: true` is enabled by default, blocking `DROP TABLE`, `DROP COLUMN`, `TRUNCATE`, and `DELETE FROM`.
 
-```bash
-# Apply all pending (production pre-deploy step)
-bun run lumora migrate
+## Cryptographic Hash-Chained Audit Logs (`RFC-05`)
 
-# Show applied / pending list
-bun run lumora migrate --status
+Lumora supports tamper-evident SHA-256 hash chaining on `_audit_logs` across SQLite, MySQL, and PostgreSQL:
 
-# Print SQL without applying (CI safety check)
-bun run lumora migrate --dry-run
-```
+- Enable via `audit: true` or `audit: { hashChain: true }` on a resource, or globally via `database.auditHashChain: true`.
+- Uses monotonic UUIDv7 IDs, canonical JSON key sorting (`canonicalJson`), `tenant_id`, `changed_fields`, `previous_hash`, and `chained_hash`.
+- Verify ledger integrity at any time via `await lumora.database.verifyAuditChain(tenantId?)`.
 
-### SFE Binary Embedding (LP-01)
+## Pagination, Delta Sync & Idempotency (`RFC-09`)
 
-Single-File Executable (SFE) deployments using `bun build --compile` cannot access raw `.sql` migration files on the filesystem.
-The `lumora sfe-prep` CLI command reads all configured migration directories and generates a TypeScript file (e.g., `_migrations_embedded.ts`).
-In the config, `migrations.embeddedFiles` is then mapped to this generated array, allowing the migration engine to run entirely from memory.
+- **Delta Queries (`?since=`)**: Resource list endpoints natively support `?since=<ISO-timestamp>` (filtering `updated_at >= since`) as well as direct filtering on `id`, `created_at`, and `updated_at`.
+- **Idempotency Middleware**: Exported `idempotency({ store: "memory" | "database", ttlMs, required })` middleware deduplicates retried `POST`/`PUT`/`PATCH` mutations by `Idempotency-Key` and SHA-256 payload hash, returning `409 IDEMPOTENCY_CONFLICT` if a key is reused with a different payload.
 
-### Production Safety (LP-03)
+## Governance & Procedural Guardrails (`RFC-08` & `RFC-10`)
 
-In production mode, `migrations.blockDestructive: true` is enabled by default. This safely prevents the execution of migration queries containing `DROP TABLE`, `DROP COLUMN`, or `TRUNCATE`, requiring manual database intervention for destructive operations.
+- **Record-Level Policy**: `permissions.allowRecord(auth, record)` is enforced across `GET /:id`, `PUT/PATCH /:id`, and `DELETE /:id`.
+- **Composable Governance Middlewares**: `requirePolicy`, `enforceSoD` (Segregation of Duties: creator !== approver), `requireThreshold` (monetary delegation tiers), and `requireTimeWindow` (fiscal period / window locks).
+- **Observability & Graceful Drain**: Built-in `/__lumora/health` (live DB `SELECT 1` readiness + latency), `/__lumora/metrics` (JSON and `?format=prometheus`), and `lumora.stop()` / `lumora.shutdown()` graceful drain.
 
-### Relationship to ensureResource
-
-`ensureResource()` still runs `CREATE TABLE IF NOT EXISTS` for each declared resource. This handles first-boot table creation and keeps zero-migration projects working without any migration files.
-
-Migrations take over for schema **evolution**: new columns, index changes, data back-fills, and any DDL that `ensureResource` cannot express.
-
-## Audit Logs
-
-Lumora v0.8.1 introduces automatic audit logging:
-
-- Enable via `audit: true` in the resource config.
-- Creates `_audit_logs` (PostgreSQL) or `lumora_audit_logs` (SQLite) table.
-- Captures `old_value` and `new_value` snapshots for every create/update/delete operation.
-- Records `actor_subject` and `actor_strategy` from the active authentication context.
-
-## Pagination & Query DSL
-
-v0.8.1 adds:
-- **Pagination Metadata**: `totalPages` and `hasNextPage` are included in list responses.
-- **Filter Operators**: Append `__gt`, `__lt`, `__in`, `__neq`, `__like`, or `__ilike` to query params (e.g. `?age__gt=21`).
-- **Batch Includes**: Relational loading uses a batched query pattern (solving N+1).
-
-## Procedural Guardrails (v0.8.9+)
-
-To enforce consistency between Auto-CRUD generated endpoints and custom manual routes, Lumora implements the following boundaries:
-
-- **Global Error Handling:** All unhandled exceptions in the Hono router fall back to the `app.onError` middleware. In `production` mode, raw stack traces are masked, emitting a generic HTTP 500 envelope. Developers can intentionally surface HTTP errors by throwing `LumoraHttpError`.
-- **Database Safety:** By configuring `database.maxRows` and `database.statementTimeoutMs`, Lumora prevents unbounded list queries in procedural logic from causing memory exhaustion. Un-paginated queries that exceed `maxRows` will trigger a throw or truncation.
-- **Envelope Consistency:** Using `c.var.ok()`, `c.var.list()`, and the `validate` middleware guarantees that all JSON mutations and list retrievals strictly conform to the Lumora HTTP shape (`{ok, data, error, meta}`).
-- **Declarative Modularity:** By passing options directly into `mountModule(path, router, { protected, roles, rateLimit, audit })`, custom logic is inherently shielded without redundant middleware boilerplate.

@@ -9,6 +9,7 @@ import type {
   TransactionEventPayload,
   TypedEventEmitter,
   AuditLogRecord,
+  AuditChainVerifyResult,
   BulkResult
 } from "./types";
 import { LumoraDuplicateError } from "./types";
@@ -85,6 +86,7 @@ function escapeValue(client: DbClient, value: unknown, field?: ResourceField): s
 }
 
 function normalizeRecord(record: Record<string, unknown>, resource: DefineResourceResult): Record<string, unknown> {
+  const excluded = new Set(resource.excludeFields ?? []);
   const normalized: Record<string, unknown> = {
     id: record.id,
     createdAt: record.created_at ?? record.createdAt,
@@ -92,7 +94,7 @@ function normalizeRecord(record: Record<string, unknown>, resource: DefineResour
   };
 
   for (const [fieldName, field] of Object.entries(resource.fields)) {
-    if (field.hidden) continue;
+    if (field.hidden || excluded.has(fieldName)) continue;
     const raw = record[fieldName];
     if (field.type === "boolean") {
       normalized[fieldName] = raw === true || raw === 1 || raw === "1";
@@ -120,9 +122,15 @@ function normalizeRecord(record: Record<string, unknown>, resource: DefineResour
 }
 
 function buildWhereClause(client: DbClient, resource: DefineResourceResult, filters: URLSearchParams, searchTerm?: string): string[] {
-  const reservedParams = new Set(["page", "pageSize", "limit", "sort", "search", "include"]);
+  const reservedParams = new Set(["page", "pageSize", "limit", "sort", "search", "include", "cursor", "since"]);
   const filterable = new Set(resource.query?.filterable ?? Object.keys(resource.fields).filter((key) => resource.fields[key]!.filterable));
   const clauses: string[] = [];
+
+  // RFC-09: Built-in delta query (?since=<ISO-timestamp>)
+  const since = filters.get("since");
+  if (since) {
+    clauses.push(`${quoteIdentifier(client, "updated_at")} > ${escapeValue(client, since)}`);
+  }
 
   const OPERATOR_RE = /^(.+?)__(gt|gte|lt|lte|neq|in|nin|like|ilike|isnull|notnull)$/;
 
@@ -130,10 +138,12 @@ function buildWhereClause(client: DbClient, resource: DefineResourceResult, filt
     if (reservedParams.has(rawKey)) continue;
 
     const match = rawKey.match(OPERATOR_RE);
-    const fieldName = match ? match[1]! : rawKey;
+    const rawFieldName = match ? match[1]! : rawKey;
+    const fieldName = rawFieldName === "createdAt" ? "created_at" : rawFieldName === "updatedAt" ? "updated_at" : rawFieldName;
     const operator  = match ? match[2]! : "eq";
 
-    if (!filterable.has(fieldName)) continue;
+    const isMetaField = fieldName === "id" || fieldName === "created_at" || fieldName === "updated_at";
+    if (!isMetaField && !filterable.has(fieldName) && !filterable.has(rawFieldName)) continue;
 
     const col   = quoteIdentifier(client, fieldName);
     const field = resource.fields[fieldName];
@@ -187,10 +197,11 @@ function buildSortClause(client: DbClient, resource: DefineResourceResult, sort?
   }
 
   const descending = sort.startsWith("-");
-  const field = descending ? sort.slice(1) : sort;
+  const rawField = descending ? sort.slice(1) : sort;
+  const field = rawField === "createdAt" ? "created_at" : rawField === "updatedAt" ? "updated_at" : rawField;
   const sortable = new Set(resource.query?.sortable ?? Object.keys(resource.fields).filter((key) => resource.fields[key]!.sortable));
 
-  if (field !== "id" && field !== "created_at" && field !== "updated_at" && !sortable.has(field)) {
+  if (field !== "id" && field !== "created_at" && field !== "updated_at" && !sortable.has(field) && !sortable.has(rawField)) {
     return "ORDER BY updated_at DESC";
   }
 
@@ -206,8 +217,98 @@ function buildTransactionPayload(resource: DefineResourceResult, action: Transac
 }
 
 function buildSelectClause(client: DbClient, resource: DefineResourceResult): string {
-  const fields = ["id", "created_at", "updated_at", ...Object.keys(resource.fields)];
+  const excluded = new Set(resource.excludeFields ?? []);
+  const fields = [
+    "id",
+    "created_at",
+    "updated_at",
+    ...Object.keys(resource.fields).filter((f) => !resource.fields[f]?.hidden && !excluded.has(f))
+  ];
   return fields.map(f => quoteIdentifier(client, f)).join(", ");
+}
+
+let lastUuidMs = 0;
+let uuidSeq = 0;
+
+function monotonicUuid(): string {
+  const now = Date.now();
+  if (now === lastUuidMs) {
+    uuidSeq = (uuidSeq + 1) & 0xfff;
+  } else {
+    lastUuidMs = now;
+    uuidSeq = 0;
+  }
+  const timeHex = now.toString(16).padStart(12, "0");
+  const seqHex = uuidSeq.toString(16).padStart(3, "0");
+  const randomUuid = crypto.randomUUID().replace(/-/g, "");
+  return `${timeHex.slice(0, 8)}-${timeHex.slice(8, 12)}-7${seqHex}-${randomUuid.slice(16, 20)}-${randomUuid.slice(20, 32)}`;
+}
+
+function normalizeAuditTimestamp(ts: unknown): string {
+  if (ts instanceof Date) return ts.toISOString();
+  const str = String(ts ?? "");
+  const parsed = Date.parse(str);
+  return Number.isNaN(parsed) ? str : new Date(parsed).toISOString();
+}
+
+function canonicalizeValue(value: unknown): unknown {
+  if (value === null || value === undefined || typeof value !== "object") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeValue);
+  }
+  const obj = value as Record<string, unknown>;
+  const sortedKeys = Object.keys(obj).sort();
+  const result: Record<string, unknown> = {};
+  for (const k of sortedKeys) {
+    if (obj[k] !== undefined) {
+      result[k] = canonicalizeValue(obj[k]);
+    }
+  }
+  return result;
+}
+
+export function canonicalJson(value: unknown): string {
+  if (typeof value === "string") {
+    try {
+      return JSON.stringify(canonicalizeValue(JSON.parse(value)));
+    } catch {
+      return value;
+    }
+  }
+  return JSON.stringify(canonicalizeValue(value ?? null));
+}
+
+function sha256Hex(input: string): string {
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(input);
+  return hasher.digest("hex");
+}
+
+function computeAuditChainHash(params: {
+  previousHash: string;
+  tenantId: string | null;
+  resource: string;
+  action: string;
+  recordId: string;
+  actorSubject: string;
+  oldValue: string;
+  newValue: string;
+  timestamp: string;
+}): string {
+  const payload = [
+    params.previousHash,
+    params.tenantId ?? "global",
+    params.resource,
+    params.action,
+    params.recordId,
+    params.actorSubject,
+    canonicalJson(params.oldValue),
+    canonicalJson(params.newValue),
+    params.timestamp
+  ].join("|");
+  return sha256Hex(payload);
 }
 
 export class LumoraDatabase {
@@ -241,7 +342,7 @@ export class LumoraDatabase {
       const rawSql = this.sql;
       this.sql = new Proxy(rawSql, {
         apply: async (target, thisArg, args) => {
-          const result = await (target as any).apply(thisArg, args);
+          const result = await Reflect.apply(target as unknown as (...a: unknown[]) => Promise<unknown>, thisArg, args);
           if (Array.isArray(result) && result.length > maxRows) {
             if (onMaxRows === "throw") {
               throw new Error(`Query returned ${result.length} rows, exceeding maxRows of ${maxRows}`);
@@ -259,9 +360,34 @@ export class LumoraDatabase {
 
   async connect(): Promise<void> {
     await this.sql.connect();
+    if (this.config.client === "sqlite") {
+      const pragmas = this.config.pragmas ?? {};
+      const isMemory = this.config.url === ":memory:" || this.config.url.includes("mode=memory");
+      const journalMode = pragmas.journalMode ?? (isMemory ? "MEMORY" : "WAL");
+      const busyTimeoutMs = pragmas.busyTimeoutMs ?? 5000;
+      const synchronous = pragmas.synchronous ?? "NORMAL";
+      const foreignKeys = pragmas.foreignKeys ?? true;
+      const cacheSizeKb = pragmas.cacheSizeKb ?? -64000;
+
+      await this.sql.unsafe(`PRAGMA journal_mode = ${journalMode};`);
+      await this.sql.unsafe(`PRAGMA busy_timeout = ${Number(busyTimeoutMs)};`);
+      await this.sql.unsafe(`PRAGMA synchronous = ${synchronous};`);
+      await this.sql.unsafe(`PRAGMA foreign_keys = ${foreignKeys ? "ON" : "OFF"};`);
+      await this.sql.unsafe(`PRAGMA cache_size = ${Number(cacheSizeKb)};`);
+    }
   }
 
   async close(): Promise<void> {
+    if (this.config.client === "sqlite") {
+      try {
+        const isMemory = this.config.url === ":memory:" || this.config.url.includes("mode=memory");
+        if (!isMemory) {
+          await this.sql.unsafe("PRAGMA wal_checkpoint(TRUNCATE);");
+        }
+      } catch {
+        // Ignore if connection is already closed
+      }
+    }
     await this.sql.close();
   }
 
@@ -371,6 +497,10 @@ export class LumoraDatabase {
     if (options.scope) {
       where.push(`${quoteIdentifier(this.config.client, options.scope.field)} = ${escapeValue(this.config.client, options.scope.value)}`);
     }
+    if (this.multiTenancy?.enabled && this.tenantId) {
+      const tenantField = this.multiTenancy.tenantIdField ?? "tenant_id";
+      where.push(`${quoteIdentifier(this.config.client, tenantField)} = ${escapeValue(this.config.client, this.tenantId)}`);
+    }
     const clause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
     const sort = buildSortClause(this.config.client, resource, options.sort);
     
@@ -380,16 +510,17 @@ export class LumoraDatabase {
       limitOffset += ` OFFSET ${offset}`;
     }
     
-    const dataQuery = `SELECT * FROM ${table} ${clause} ${sort} ${limitOffset}`;
+    const select = buildSelectClause(this.config.client, resource);
+    const dataQuery = `SELECT ${select} FROM ${table} ${clause} ${sort} ${limitOffset}`;
     const countQuery = `SELECT COUNT(*) as total FROM ${table} ${clause}`;
     const [rows, countRows] = await Promise.all([
       this.sql.unsafe<Record<string, unknown>[]>(dataQuery),
-      this.sql.unsafe<Record<string, unknown>[]>(countQuery)
+      this.sql.unsafe<{ total: number | string }[]>(countQuery)
     ]);
     const items = rows.map((row) => normalizeRecord(row, resource));
     return {
       items,
-      total: Number((countRows[0] as any)?.total ?? 0),
+      total: Number(countRows[0]?.total ?? 0),
       page: options.page,
       pageSize: options.pageSize,
       nextCursor: items.length > 0 ? (items[items.length - 1]?.id as string) : undefined
@@ -549,7 +680,7 @@ export class LumoraDatabase {
         CREATE TABLE IF NOT EXISTS ${schemaPrefix}"_audit_logs" (
           "id"              TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
           "resource"        TEXT        NOT NULL,
-          "action"          TEXT        NOT NULL CHECK (action IN ('create', 'update', 'delete')),
+          "action"          TEXT        NOT NULL,
           "record_id"       TEXT        NOT NULL,
           "actor_subject"   TEXT        NOT NULL,
           "actor_strategy"  TEXT        NOT NULL,
@@ -557,8 +688,15 @@ export class LumoraDatabase {
           "new_value"       JSONB,
           "request_id"      TEXT        NOT NULL,
           "request_path"    TEXT        NOT NULL,
-          "timestamp"       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          "timestamp"       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          "tenant_id"       TEXT,
+          "previous_hash"   TEXT,
+          "chained_hash"    TEXT
         );
+        ALTER TABLE ${schemaPrefix}"_audit_logs" DROP CONSTRAINT IF EXISTS "_audit_logs_action_check";
+        ALTER TABLE ${schemaPrefix}"_audit_logs" ADD COLUMN IF NOT EXISTS "tenant_id" TEXT;
+        ALTER TABLE ${schemaPrefix}"_audit_logs" ADD COLUMN IF NOT EXISTS "previous_hash" TEXT;
+        ALTER TABLE ${schemaPrefix}"_audit_logs" ADD COLUMN IF NOT EXISTS "chained_hash" TEXT;
         CREATE INDEX IF NOT EXISTS "_audit_logs_resource_record_idx"
           ON ${schemaPrefix}"_audit_logs" ("resource", "record_id");`;
       await this.sql.unsafe(ddl);
@@ -575,9 +713,19 @@ export class LumoraDatabase {
           \`new_value\` TEXT NOT NULL,
           \`request_id\` TEXT NOT NULL,
           \`request_path\` TEXT NOT NULL,
-          \`timestamp\` TEXT NOT NULL
+          \`timestamp\` TEXT NOT NULL,
+          \`tenant_id\` TEXT,
+          \`previous_hash\` TEXT,
+          \`chained_hash\` TEXT
         )`;
       await this.sql.unsafe(ddl);
+      for (const col of ["tenant_id", "previous_hash", "chained_hash"]) {
+        try {
+          await this.sql.unsafe(`ALTER TABLE \`_audit_logs\` ADD COLUMN \`${col}\` TEXT`);
+        } catch {
+          // Column already exists
+        }
+      }
     }
   }
 
@@ -627,20 +775,136 @@ export class LumoraDatabase {
     `);
   }
 
-  async writeAuditLog(entry: Omit<AuditLogRecord, "id">): Promise<void> {
-    const id = crypto.randomUUID();
-    const columns = Object.keys({ id, ...entry }).map(k => quoteIdentifier(this.config.client, k)).join(", ");
-    const values = Object.values({ id, ...entry })
-      .map((v) => escapeValue(this.config.client, v))
-      .join(", ");
+  async writeAuditLog(
+    entry: Omit<AuditLogRecord, "id">,
+    options?: { hashChain?: boolean }
+  ): Promise<void> {
+    const id = monotonicUuid();
+    const tenantId = entry.tenant_id ?? this.tenantId ?? undefined;
+    const normalizedTs = normalizeAuditTimestamp(entry.timestamp);
+
     let schemaPrefix = "";
     if (this.config.client === "postgresql" && this.config.schema && this.config.schema !== "public") {
       schemaPrefix = `"${this.config.schema}".`;
     }
     const table = this.config.client === "postgresql" ? `${schemaPrefix}"_audit_logs"` : "`_audit_logs`";
+
+    let previousHash = entry.previous_hash;
+    let chainedHash = entry.chained_hash;
+
+    if (options?.hashChain) {
+      const tenantWhere = tenantId
+        ? `${quoteIdentifier(this.config.client, "tenant_id")} = ${escapeValue(this.config.client, tenantId)}`
+        : `${quoteIdentifier(this.config.client, "tenant_id")} IS NULL`;
+      const prevRows = await this.sql.unsafe<{ chained_hash: string }[]>(
+        `SELECT ${quoteIdentifier(this.config.client, "chained_hash")} FROM ${table} WHERE ${quoteIdentifier(this.config.client, "chained_hash")} IS NOT NULL AND ${tenantWhere} ORDER BY ${quoteIdentifier(this.config.client, "id")} DESC LIMIT 1`
+      );
+      previousHash = prevRows[0]?.chained_hash ?? "GENESIS";
+      chainedHash = computeAuditChainHash({
+        previousHash,
+        tenantId: tenantId ?? null,
+        resource: entry.resource,
+        action: entry.action,
+        recordId: entry.record_id,
+        actorSubject: entry.actor_subject,
+        oldValue: entry.old_value,
+        newValue: entry.new_value,
+        timestamp: normalizedTs
+      });
+    }
+
+    const row: Record<string, unknown> = {
+      id,
+      resource: entry.resource,
+      action: entry.action,
+      record_id: entry.record_id,
+      actor_subject: entry.actor_subject,
+      actor_strategy: entry.actor_strategy,
+      old_value: entry.old_value,
+      new_value: entry.new_value,
+      request_id: entry.request_id,
+      request_path: entry.request_path,
+      timestamp: normalizedTs,
+      ...(tenantId !== undefined ? { tenant_id: tenantId } : {}),
+      ...(previousHash !== undefined ? { previous_hash: previousHash } : {}),
+      ...(chainedHash !== undefined ? { chained_hash: chainedHash } : {})
+    };
+
+    const columns = Object.keys(row).map(k => quoteIdentifier(this.config.client, k)).join(", ");
+    const values = Object.values(row)
+      .map((v) => escapeValue(this.config.client, v))
+      .join(", ");
+
     await this.sql.unsafe(
       `INSERT INTO ${table} (${columns}) VALUES (${values})`
     );
+  }
+
+  /**
+   * RFC-05: Verify cryptographic SHA-256 hash chain integrity of `_audit_logs`.
+   */
+  async verifyAuditChain(tenantId?: string): Promise<AuditChainVerifyResult> {
+    let schemaPrefix = "";
+    if (this.config.client === "postgresql" && this.config.schema && this.config.schema !== "public") {
+      schemaPrefix = `"${this.config.schema}".`;
+    }
+    const table = this.config.client === "postgresql" ? `${schemaPrefix}"_audit_logs"` : "`_audit_logs`";
+    const effectiveTenant = tenantId ?? this.tenantId;
+    const tenantFilter = effectiveTenant !== undefined
+      ? ` AND ${quoteIdentifier(this.config.client, "tenant_id")} = ${escapeValue(this.config.client, effectiveTenant)}`
+      : "";
+
+    const rows = await this.sql.unsafe<Record<string, unknown>[]>(
+      `SELECT * FROM ${table} WHERE ${quoteIdentifier(this.config.client, "chained_hash")} IS NOT NULL${tenantFilter} ORDER BY ${quoteIdentifier(this.config.client, "id")} ASC`
+    );
+
+    const lastHashByTenant = new Map<string, string>();
+    let checkedCount = 0;
+
+    for (const row of rows) {
+      checkedCount++;
+      const rowTenant = row.tenant_id ? String(row.tenant_id) : null;
+      const tKey = rowTenant ?? "global";
+      const expectedPrev = lastHashByTenant.get(tKey) ?? "GENESIS";
+      const actualPrev = String(row.previous_hash ?? "");
+
+      if (actualPrev !== expectedPrev) {
+        return {
+          valid: false,
+          checkedCount,
+          brokenAtId: String(row.id),
+          expectedHash: expectedPrev,
+          actualHash: actualPrev
+        };
+      }
+
+      const expectedHash = computeAuditChainHash({
+        previousHash: expectedPrev,
+        tenantId: rowTenant,
+        resource: String(row.resource),
+        action: String(row.action),
+        recordId: String(row.record_id),
+        actorSubject: String(row.actor_subject),
+        oldValue: typeof row.old_value === "string" ? row.old_value : JSON.stringify(row.old_value ?? {}),
+        newValue: typeof row.new_value === "string" ? row.new_value : JSON.stringify(row.new_value ?? {}),
+        timestamp: normalizeAuditTimestamp(row.timestamp)
+      });
+
+      const actualHash = String(row.chained_hash ?? "");
+      if (actualHash !== expectedHash) {
+        return {
+          valid: false,
+          checkedCount,
+          brokenAtId: String(row.id),
+          expectedHash,
+          actualHash
+        };
+      }
+
+      lastHashByTenant.set(tKey, expectedHash);
+    }
+
+    return { valid: true, checkedCount };
   }
 
   // LS-2: Internal helpers for relation resolution (bypass filterable restriction)

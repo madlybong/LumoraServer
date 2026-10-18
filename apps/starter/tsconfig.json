@@ -1,4 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@astrake/lumora-server": ["../../packages/core/src/index.ts"]
+    }
+  },
   "include": ["src/**/*.ts", "routes/**/*.ts", "lumora.config.ts"]
 }

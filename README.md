@@ -33,9 +33,10 @@ From a single `lumora.config.ts` and a `routes/` folder, Lumora generates:
 - **File upload/serve** — `POST /{base}/{version}/{resource}/:id/files` · `GET /{base}/{version}/{resource}/:id/files/:field`
 - **SSE stream** — `GET /{base}/{version}/{resource}/events`
 - **WebSocket endpoint** — `GET /{base}/{version}/{resource}/ws`
-- **OpenAPI 3.1.0 document** — `GET /__lumora/openapi.json` *(dev mode)*
+- **OpenAPI 3.1.0 document** — `GET /__lumora/openapi.json` *(dev mode, merges `defineResource` + `mountModule` / `OpenAPIHono` routes)*
 - **Docs UI** — `GET /__lumora/docs` *(dev mode)*
-- **Health check** — `GET /health`
+- **Health & Readiness probe** — `GET /health` · `GET /__lumora/health` *(live DB `SELECT 1` latency)*
+- **Telemetry Metrics** — `GET /__lumora/metrics` *(JSON & `?format=prometheus`)*
 
 ---
 
@@ -56,7 +57,7 @@ git clone https://github.com/madlybong/LumoraServer.git
 cd LumoraServer
 bun install
 bun run check      # typecheck
-bun test           # run test suite (153 tests)
+bun test           # run test suite (165 tests)
 bun run dev        # start the reference starter app
 ```
 
@@ -101,11 +102,28 @@ export default defineLumoraConfig({
   name: "lumora-app",
   mode: "development",
   api: { base: "/api", version: "v1" },
-  database: { client: "sqlite", url: "./app.db" },
-  auth: { mode: "jwt", secret: process.env.JWT_SECRET! },
+  database: {
+    client: "sqlite",
+    url: "./app.db",
+    autoBackup: true,
+    maxRetainedBackups: 5,
+    auditHashChain: true,
+    pragmas: { journalMode: "WAL", busyTimeoutMs: 5000, synchronous: "NORMAL", foreignKeys: true }
+  },
+  auth: {
+    mode: "jwt",
+    secret: process.env.JWT_SECRET!,
+    refreshSecret: process.env.JWT_REFRESH_SECRET,
+    claimMapping: {
+      subject: "sub",
+      roles: "roles",
+      tenantId: "tenantId",
+      scopes: ["companyId", "branchId"]
+    }
+  },
   routes: { dir: "./routes" },
   migrations: { dir: "./migrations/sqlite" },
-  realtime: { enabled: true },
+  realtime: { enabled: true, heartbeatIntervalMs: 25000, maxReplayBuffer: 100 },
   ai: {
     providers: { gemini: { apiKey: process.env.GEMINI_API_KEY! } },
     defaultProvider: "gemini",
@@ -159,8 +177,12 @@ import { initLumora } from "@astrake/lumora-server";
 
 const lumora = await initLumora("./lumora.config.ts");
 
-// Realtime broadcast
+// Realtime broadcast (global or tenant-partitioned)
 lumora.realtime.broadcast("products:updated", { id: "123" });
+lumora.realtime.publishToTenant("tenant-acme", "alerts", { message: "Stock low" });
+
+// Verify tamper-evident SHA-256 audit hash chain
+const auditCheck = await lumora.database.verifyAuditChain("tenant-acme");
 
 // AI gateway
 const result = await lumora.ai.chat({
@@ -180,15 +202,15 @@ const data = await lumora.query.execute(
 
 | Concern | Technology |
 |---------|-----------|
-| Runtime | Bun 1.3.12 |
-| HTTP framework | Hono 4.9.7 |
+| Runtime | Bun 1.3.12+ |
+| HTTP framework | Hono 4.12+ & `@hono/zod-openapi` |
 | Language | TypeScript 5.9+ |
-| Database | SQLite (`bun:sqlite`), MySQL, PostgreSQL (`bun:postgres` / `bun:sql`) |
-| Auth | Static token · HS256 JWT |
-| Realtime | In-process SSE + WebSocket pub/sub hub |
-| Scheduling | Native `Bun.cron` (declarative DSL, retry, logging) |
+| Database | SQLite (`bun:sql` with WAL & `busy_timeout`), MySQL, PostgreSQL (`bun:sql`) |
+| Auth | Static token · HS256 JWT (Access + Refresh rotation, claim mapping) · Custom verifier |
+| Realtime | In-process SSE + WebSocket pub/sub hub (tenant isolation, `: ping` heartbeats, `Last-Event-ID` replay) |
+| Scheduling | Native `Bun.cron` (declarative DSL, retry, logging, graceful drain) |
 | AI Gateway | Gemini · OpenAI · Anthropic · Kilo · custom |
-| Docs | Auto-generated OpenAPI 3.1.0 |
+| Docs | Auto-generated OpenAPI 3.1.0 (`defineResource` + `mountModule` / `OpenAPIHono` introspection) |
 
 ---
 
@@ -204,54 +226,77 @@ const data = await lumora.query.execute(
 | LS-6 | Namespaced event bus | `resource:{name}:created/updated/deleted` |
 | LS-7 | Realtime broadcast | `instance.realtime.broadcast(topic, data)` |
 | LS-8 | Declarative scheduler | `schedule: [...]` in config |
-| LS-9 | Store-scoped permissions | `permissions.scope` in `defineResource()` |
+| LS-9 | Store & record-scoped permissions | `permissions.scope` & `permissions.allowRecord` in `defineResource()` |
 | LS-10 | AI provider gateway | `instance.ai.chat()`, `getUsage()` |
 | LS-11 | Structured query executor | `instance.query.execute(descriptor, ctx)` |
 | LS-12 | File-based SQL migrations | `bun run lumora migrate` |
-| LS-13 | Custom routing | `instance.mountModule(path, router)` |
-| LS-14 | Rate limiting | `rateLimit(opts)` middleware |
-| LS-15 | Advanced Filtering | `?field__gt=10`, `__in`, `__like` |
-| LS-16 | Audit Logs | `audit: true` in `defineResource()` |
+| LS-13 | Custom routing | `instance.mountModule(path, router, options)` |
+| LS-14 | Rate limiting | `rateLimit(opts)` middleware + `X-RateLimit-*` / `Retry-After` headers |
+| LS-15 | Advanced & Delta Filtering | `?field__gt=10`, `__in`, `__like`, `?since=<ISO>` |
+| LS-16 | Cryptographic Audit Logs | `audit: { hashChain: true }` + `database.verifyAuditChain(tenantId?)` |
 | LP-01 | SFE binary embedded migrations | `embeddedFiles` in config & `lumora sfe-prep` |
-| LP-02 | SQLite auto-backup | `autoBackup: true` in `database` config |
-| LP-03 | Prod-safe migration defaults | `blockDestructive: true` in `migrations` config |
-| LP-04 | Custom claims / afterVerify | `afterVerify` hook in `auth` config |
-| LP-05 | Opt-in Realtime routes | `realtime: { enabled: true }` in config |
+| LP-02 | Atomic SQLite backup & restore | `autoBackup: true` (`VACUUM INTO`, retention pruning, auto-restore on failure) |
+| LP-03 | Prod-safe migration defaults | `blockDestructive: true` (`DROP`, `TRUNCATE`, `DELETE FROM`) & SHA-256 verification |
+| LP-04 | Custom Auth & JWT rotation | `auth.mode: "custom"`, `claimMapping`, `signLumoraJwt`, `rotateLumoraTokens` |
+| LP-05 | Tenant-isolated Realtime | `publishToTenant`, `createTenantSseResponse`, SSE heartbeats & `Last-Event-ID` replay |
+| LP-06 | Sub-router OpenAPI 3.1.0 merge | `OpenAPIHono`, `createRoute`, `z` & Hono route tree introspection |
+| LP-07 | Governance & Idempotency middlewares | `enforceSoD`, `requireThreshold`, `requireTimeWindow`, `requirePolicy`, `idempotency` |
+| LP-08 | Observability & Graceful drain | `/__lumora/health`, `/__lumora/metrics` (JSON/Prometheus), `lumora.stop()` |
 
 ---
 
-## Custom Procedural Routes (New in v0.8.9)
+## Custom Procedural Routes & OpenAPI Introspection
 
-When your application outgrows the Auto-CRUD endpoints, use `mountModule` to register procedural endpoints with enterprise-grade guardrails:
+When your application outgrows Auto-CRUD endpoints, use `mountModule` with `OpenAPIHono` (or `Hono`) to register procedural endpoints with enterprise-grade governance, idempotency, and automatic OpenAPI 3.1.0 merging:
 
 ```typescript
-import { Hono } from "hono";
-import { validate, getPrincipal, LumoraHttpError } from "@astrake/lumora-server";
-import { z } from "zod";
+import {
+  OpenAPIHono,
+  createRoute,
+  z,
+  validate,
+  idempotency,
+  enforceSoD,
+  requireThreshold,
+  getPrincipal,
+  LumoraHttpError,
+  type LumoraHonoVariables
+} from "@astrake/lumora-server";
 
-const router = new Hono();
+const router = new OpenAPIHono<{ Variables: LumoraHonoVariables }>();
 
-// 1. Zod/Yup validation directly integrated with the Lumora error envelope
-router.post("/process", validate({ json: z.object({ query: z.string() }) }), async (c) => {
-  // 2. Safely extract the typed principal
-  const user = getPrincipal(c);
-  const data = c.var.valid.json;
+// 1. Zod validation + idempotency replay protection + Segregation of Duties + Delegation thresholds
+router.post(
+  "/approve",
+  idempotency({ store: "database", required: true }),
+  enforceSoD((c) => c.req.header("x-creator-id")),
+  requireThreshold({
+    getValue: async (c) => Number(c.req.header("x-amount") ?? 0),
+    tiers: [
+      { maxAmount: 10_000, roles: ["manager"] },
+      { maxAmount: 100_000, roles: ["director", "admin"] }
+    ]
+  }),
+  validate({ json: z.object({ query: z.string() }) }),
+  async (c) => {
+    const user = getPrincipal(c);
+    const data = c.var.valid.json;
 
-  if (data.query === "error") {
-    // 3. Throw intentional, structured HTTP errors
-    throw new LumoraHttpError(400, "BAD_QUERY", "Invalid procedural query");
+    if (data.query === "error") {
+      throw new LumoraHttpError(400, "BAD_QUERY", "Invalid procedural query");
+    }
+
+    return c.var.ok({ result: "Approved", actor: user.subject });
   }
+);
 
-  // 4. Return standardized envelopes
-  return c.var.ok({ result: "Success" });
-});
-
-// 5. Mount with declarative boundaries (auth, roles, rate limits, audits)
-lumora.mountModule("/custom", router, { 
-  protected: true, 
-  roles: ["admin"], 
+// 2. Mount with declarative boundaries (auth, roles, rate limits, audits, OpenAPI tags)
+lumora.mountModule("/custom", router, {
+  protected: true,
+  roles: ["manager", "director", "admin"],
   rateLimit: true,
-  audit: true 
+  audit: true,
+  openApiTags: ["custom"]
 });
 ```
 
