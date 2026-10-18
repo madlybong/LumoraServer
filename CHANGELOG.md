@@ -4,6 +4,34 @@
 
 ---
 
+## [0.9.0] — 2026-10-18
+
+### Added
+
+- implement RFC-01 through RFC-10 enterprise upgrades (`400120f`)
+- add procedural guardrails and response envelopes (`9ec00fb`)
+
+### Fixed
+
+- resolve CodeQL and Dependabot alerts (`03ebcb3`)
+
+### Maintenance
+
+- bump version to 0.8.10 (`0023af4`)
+- update CHANGELOG for v0.8.9 (`df9b11a`)
+- bump version to 0.8.9 (`643e554`)
+- update CHANGELOG for v0.8.8 (`c05d3db`)
+- bump version to 0.8.8 (`78e9f59`)
+- update CHANGELOG for v0.8.7 (`9cda126`)
+- bump version to 0.8.7 (`c271d5f`)
+- update CHANGELOG for v0.8.6 (`55e17da`)
+- bump version to 0.8.6 (`80a1aae`)
+- update CHANGELOG for v0.8.5 (`292a877`)
+- bump version to 0.8.5 (`de1324a`)
+
+
+---
+
 ## [0.8.10] — 2026-10-07
 
 ### Added
