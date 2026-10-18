@@ -53,9 +53,16 @@ The returned runtime instance exposes:
 - `fetch`
 - `websocket`
 - `config`
+- `database`
 - `events`
 - `realtime`
 - `docs`
+- `query`
+- `resources`
+- `apiPrefix`
+- `mountModule(path, router, options?)`
+- `shutdown()` / `stop()`
+- `onShutdown(callback)`
 - `close()`
 
 ## Resource model
@@ -69,6 +76,8 @@ A resource can define:
 - `fields`
 - `auth`
 - `query`
+- `permissions`
+- `audit`
 - `hooks`
 - `meta`
 
@@ -78,9 +87,10 @@ The runtime uses that schema to generate:
 - `GET /{base}/{version}/{resource}/:id`
 - `POST /{base}/{version}/{resource}`
 - `PUT /{base}/{version}/{resource}/:id`
+- `PATCH /{base}/{version}/{resource}/:id`
 - `DELETE /{base}/{version}/{resource}/:id`
-- `GET /{base}/{version}/{resource}/events`
-- `GET /{base}/{version}/{resource}/ws`
+- `GET /{base}/{version}/{resource}/events` *(when `realtime.enabled: true`)*
+- `GET /{base}/{version}/{resource}/ws` *(when `realtime.enabled: true`)*
 
 ## Auth model
 
@@ -124,9 +134,9 @@ That lets the parent app subscribe once and react consistently across transports
 
 **Opt-in Mounting, Tenant Isolation, Heartbeats & Replay (`RFC-06` / `LP-05`)**:
 - By default, `/events` (SSE) and `/ws` (WebSockets) routes are not mounted unless `realtime: { enabled: true }` is set in `lumora.config.ts`.
-- Supports tenant-partitioned channels via `lumora.realtime.publishToTenant(tenantId, event, payload)` and `createTenantSseResponse(tenantId, channel, lastEventId)`.
+- Supports tenant-partitioned channels via `lumora.realtime.publishToTenant(tenantId, event, payload)` and `createTenantSseResponse(tenantId, channel, c?, options?)`.
 - Resource SSE and WebSocket streams automatically filter events by the subscriber's `tenantId` and `permissions.scope.field`.
-- Configurable SSE keep-alive heartbeat comments (`: ping\n\n` via `heartbeatIntervalMs`, default `15000ms`) and ring-buffer event replay via `Last-Event-ID` (`maxReplayBuffer`, default `250`).
+- Configurable SSE keep-alive heartbeat comments (`: ping\n\n` via `heartbeatIntervalMs`, default `25000ms`) and ring-buffer event replay via `Last-Event-ID` (`maxReplayBuffer`, default `100`).
 
 ## Docs model
 

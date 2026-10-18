@@ -1,120 +1,335 @@
-# @astrake/lumora-server (Full Reference)
+# @astrake/lumora-server (Full Agentic Reference & v0.9.0 Migration Guide)
 
-This document contains full details for generating code compatible with `@astrake/lumora-server` v0.8.2.
+This document contains the complete, code-audited specification for generating, maintaining, and migrating parent applications built on `@astrake/lumora-server` **v0.9.0**.
 
-## Complete Configuration Signature
+---
+
+## 1. Complete Configuration Signature (`lumora.config.ts`)
+
 ```typescript
+import type { Context } from "hono";
+
+export interface SqlitePragmasConfig {
+  journalMode?: "WAL" | "DELETE" | "TRUNCATE" | "PERSIST" | "MEMORY" | "OFF"; // default: "WAL" ("MEMORY" for :memory:)
+  busyTimeoutMs?: number;       // default: 5000
+  synchronous?: "OFF" | "NORMAL" | "FULL" | "EXTRA"; // default: "NORMAL"
+  foreignKeys?: boolean;        // default: true
+  cacheSizeKb?: number;         // default: -64000 (~64MB)
+}
+
+export interface JwtClaimMapping {
+  subject?: string;   // default: "sub"
+  roles?: string;     // default: "roles" (accepts string[] or single string)
+  tenantId?: string;  // default: "tenant_id"
+  scopes?: string[];  // e.g. ["companyId", "branchId", "projectId"]
+}
+
+export type LumoraAuthConfig = {
+  protectedPaths?: string[];
+  publicPaths?: string[];
+  customClaims?: string[];
+  afterVerify?: (ctx: {
+    claims: Record<string, unknown>;
+    token: string;
+    db: LumoraDatabase;
+    c: Context;
+  }) => Promise<boolean> | boolean;
+} & (
+  | { mode: "disabled" } // Allowed in development/test ONLY; throws in production
+  | { mode: "static"; token: string; header?: string }
+  | {
+      mode: "jwt";
+      secret: string;
+      refreshSecret?: string;
+      issuer?: string;
+      audience?: string;
+      clockSkewSeconds?: number;
+      claimMapping?: JwtClaimMapping;
+    }
+  | {
+      mode: "custom";
+      verify: (c: Context) => Promise<LumoraAuthResult | null> | LumoraAuthResult | null;
+    }
+);
+
+export type LumoraDatabaseConfig =
+  | {
+      client: "sqlite";
+      url: string;
+      autoBackup?: boolean;
+      maxRetainedBackups?: number;
+      pragmas?: SqlitePragmasConfig;
+      auditHashChain?: boolean;
+      maxRows?: number;
+      onMaxRows?: "throw" | "truncate" | "warn";
+      statementTimeoutMs?: number;
+    }
+  | {
+      client: "mysql";
+      url: string;
+      autoBackup?: boolean;
+      auditHashChain?: boolean;
+      maxRows?: number;
+      onMaxRows?: "throw" | "truncate" | "warn";
+      statementTimeoutMs?: number;
+    }
+  | {
+      client: "postgresql";
+      url: string;
+      autoBackup?: boolean;
+      auditHashChain?: boolean;
+      pool?: { min?: number; max?: number; idleTimeout?: number };
+      schema?: string;
+      ssl?: boolean | { ca?: string; cert?: string; key?: string; rejectUnauthorized?: boolean };
+      maxRows?: number;
+      onMaxRows?: "throw" | "truncate" | "warn";
+      statementTimeoutMs?: number;
+    };
+
 export interface LumoraConfig {
-  name: string;
-  mode: "development" | "production" | "test";
+  name?: string;
+  mode?: "development" | "production" | "test";
+  server?: { host?: string; port?: number };
   api: { base: string; version: string };
-  database: {
-    client: "sqlite" | "mysql" | "postgresql";
-    url: string;
-    schema?: string; // Postgres only
-    pool?: { min: number; max: number }; // Postgres only
-    autoBackup?: boolean; // SQLite only
+  routes?: { dir?: string };
+  resources?: DefineResourceResult[];
+  auth?: LumoraAuthConfig;
+  database: LumoraDatabaseConfig;
+  docs?: { enabled?: boolean; path?: string; openApiPath?: string };
+  realtime?: {
+    enabled?: boolean;          // default: false
+    sseSuffix?: string;         // default: "events"
+    websocketSuffix?: string;   // default: "ws"
+    heartbeatIntervalMs?: number; // default: 25000 (0 to disable)
+    maxReplayBuffer?: number;   // default: 100
   };
-  auth: {
-    mode: "disabled" | "static" | "jwt";
-    secret?: string;
-    afterVerify?: (ctx, claims) => Promise<AuthContext>;
+  logging?: { level?: "silent" | "minimal" | "verbose" };
+  upload?: { dir: string; maxFileSizeMb?: number; serveAt?: string };
+  email?: LumoraEmailConfig;
+  ai?: LumoraAIConfig;
+  schedule?: LumoraScheduledTask[];
+  migrations?: {
+    dir?: string;
+    mode?: "auto" | "strict" | "off";
+    blockDestructive?: boolean; // default: true in production (blocks DROP TABLE, DROP COLUMN, TRUNCATE, DELETE FROM)
+    allowDowngrade?: boolean;   // default: false in production
+    embeddedFiles?: Record<string, string>;
   };
-  routes: { dir: string };
-  migrations?: { dir: string; blockDestructive?: boolean; embeddedFiles?: any[] };
-  realtime?: { enabled: boolean };
+  auditHashChain?: boolean;
+  rateLimit?: {
+    enabled?: boolean;
+    windowMs?: number;
+    max?: number;
+    store?: "memory" | "database";
+  };
+  multiTenancy?: {
+    enabled?: boolean;
+    tenantIdField?: string;
+  };
 }
 ```
 
-## Complete Resource Definition Options
+---
+
+## 2. Complete Resource Definition Options (`defineResource`)
+
 ```typescript
-export interface DefineResourceOptions {
+export interface DefineResourceInput {
   resource: string;
   table?: string;
   fields: Record<string, {
-    type: "string" | "number" | "boolean" | "file" | "file[]" | "json";
+    type: "string" | "number" | "boolean" | "uuid" | "date" | "json" | "file" | "file[]";
     required?: boolean;
-    default?: any;
-    searchable?: boolean; // for ?search=
-    filterable?: boolean; // for ?field= and __gt, __lt, etc.
+    default?: unknown;
+    searchable?: boolean; // enables ?search=
+    filterable?: boolean; // enables ?field= and __gt, __lt, __in, __neq, __like, __ilike
+    sortable?: boolean;   // enables ?sort=field or ?sort=-field
     unique?: boolean;
-    indexed?: boolean;
-    hidden?: boolean; // excluded from GET responses
-    readOnly?: boolean; // excluded from client mutations
-    visibleTo?: string[]; // RBAC field redaction
+    accept?: string[];    // for file / file[]
+    maxSize?: string;     // e.g. "10MB"
+    visibleTo?: string[]; // RBAC field-level redaction
+    hidden?: boolean;     // excluded from SQL SELECT and GET responses
+    readOnly?: boolean;   // stripped from POST/PUT/PATCH payloads
   }>;
-  computed?: Record<string, { type: string; resolve: (record, ctx) => any }>;
-  relations?: Record<string, { resource: string; foreignKey: string; type: "belongsTo" | "hasMany" }>;
-  audit?: boolean; // Enables _audit_logs
-  permissions?: {
-    scope?: { field: string }; // row-level multitenancy
-    roles?: Record<string, string[]>; // e.g. { "POST": ["admin"] }
+  auth?: "inherit" | "public" | "protected";
+  readOnly?: boolean;
+  immutable?: boolean;
+  excludeFields?: string[]; // omitted from SQL SELECT projection in list()
+  updateMethod?: "PUT" | "PATCH" | "both";
+  rateLimit?: { disabled?: boolean; windowMs?: number; max?: number };
+  audit?: boolean | { enabled?: boolean; hashChain?: boolean };
+  query?: {
+    searchable?: string[];
+    filterable?: string[];
+    sortable?: string[];
+    defaultSort?: string;
+    defaultPageSize?: number;
+    maxPageSize?: number;
   };
+  computed?: Record<string, {
+    type: "string" | "number" | "boolean" | "json";
+    resolve: (record: Record<string, unknown>, ctx: { auth?: LumoraAuthResult; database: LumoraDatabase }) => Promise<unknown> | unknown;
+  }>;
+  relations?: Record<string, {
+    resource: string;
+    type: "belongsTo" | "hasMany";
+    foreignKey: string;
+  }>;
+  export?: { csv?: boolean | { maxRows?: number } };
+  permissions?: {
+    roles?: Partial<Record<"GET" | "GET_ONE" | "POST" | "PUT" | "PATCH" | "DELETE" | "BULK" | "EXPORT", string[]>>;
+    scope?: { field: string; claimKey?: string; allowUnscopedForRoles?: string[] };
+    allow?: (ctx: PermissionContext) => Promise<boolean> | boolean;
+    /** Enforced on GET /:id, PUT /:id, PATCH /:id, and DELETE /:id */
+    allowRecord?: (auth: LumoraAuthResult, record: Record<string, unknown>) => Promise<boolean> | boolean;
+  };
+  hooks?: {
+    beforeCreate?: (ctx: ResourceHookContext) => Promise<Record<string, unknown>> | Record<string, unknown>;
+    afterCreate?: (record: Record<string, unknown>) => Promise<void> | void;
+    beforeUpdate?: (ctx: ResourceHookContext) => Promise<Record<string, unknown>> | Record<string, unknown>;
+    afterUpdate?: (record: Record<string, unknown>) => Promise<void> | void;
+    beforeDelete?: (ctx: ResourceHookContext) => Promise<void> | void;
+    afterDelete?: (record: Record<string, unknown>) => Promise<void> | void;
+  };
+  meta?: { label?: string; description?: string; icon?: string; group?: string };
 }
 ```
 
-## Filtering Operators
-When `filterable: true` is set on a field, clients can use:
-- `?age=20` (exact match)
-- `?age__gt=20` (greater than)
-- `?age__lt=20` (less than)
-- `?status__in=active,pending` (in array)
-- `?name__like=john` (SQL LIKE)
-- `?name__ilike=john` (Case-insensitive LIKE for Postgres)
-- `?status__neq=deleted` (not equal)
+---
 
-Pagination is built-in (`?page=1&pageSize=10` or `?limit=10`), returning `total`, `totalPages`, and `hasNextPage` metadata.
+## 3. Enterprise Capabilities in `v0.9.0` (`RFC-01` through `RFC-10`)
 
-## SFE Embedded Migrations
-For single-file executable deployments (`bun build --compile`):
-1. Run `bun run lumora sfe-prep` to generate `_migrations_embedded.ts`.
-2. Import the array and pass it to config:
+### RFC-01: Custom Auth, Dual-Token Rotation & Multi-Axis Claim Mapping
+- **Custom Auth in Production:** Use `auth: { mode: "custom", verify: async (c) => ({ subject: "u1", strategy: "custom", token: "...", roles: ["admin"], scope: { tenant_id: "t1" } }) }` when your parent app uses session/TOTP/OAuth verification. Note: `auth: { mode: "disabled" }` is strictly blocked in `production`.
+- **JWT Claim Mapping:** Map custom JWT payload keys into `LumoraAuthResult` without rewriting tokens:
+  ```typescript
+  auth: {
+    mode: "jwt",
+    secret: process.env.JWT_SECRET!,
+    refreshSecret: process.env.JWT_REFRESH_SECRET,
+    claimMapping: {
+      subject: "userId",
+      roles: "role",
+      tenantId: "companyId",
+      scopes: ["companyId", "branchId", "verticalId"]
+    }
+  }
+  ```
+- **Token Signing & Refresh Rotation Helpers:**
+  ```typescript
+  import { signLumoraJwt, rotateLumoraTokens } from "@astrake/lumora-server";
+
+  const accessToken = await signLumoraJwt({ sub: "u1", roles: ["admin"] }, secret, { expiresInSeconds: 900 });
+  const refreshToken = await signLumoraJwt({ sub: "u1", token_use: "refresh" }, refreshSecret, { expiresInSeconds: 604800 });
+  const rotated = await rotateLumoraTokens(refreshToken, { secret, refreshSecret });
+  ```
+
+### RFC-02 & RFC-03: Enterprise SQLite Pragmas, Atomic `VACUUM INTO` Backups & Migration Guards
+- **Automatic SQLite Pragmas:** File-based SQLite databases automatically apply `PRAGMA journal_mode = WAL`, `PRAGMA busy_timeout = 5000`, `PRAGMA synchronous = NORMAL`, `PRAGMA foreign_keys = ON`, and `PRAGMA cache_size = -64000` on `connect()`, and run `PRAGMA wal_checkpoint(TRUNCATE)` on `close()`.
+- **Atomic Pre-Migration Backup & Auto-Restore:** When `database.autoBackup: true` is enabled on SQLite, Lumora executes `VACUUM INTO` (falling back to file + `-wal`/`-shm` copy), prunes older backups via `maxRetainedBackups`, and automatically restores the pre-migration backup if any pending migration fails.
+- **Migration Checksum & Destructive Guards:** `migrations.status()` verifies SHA-256 checksums for all applied migrations even when `pending.length === 0`. `blockDestructive: true` blocks `DROP TABLE`, `DROP COLUMN`, `TRUNCATE`, and `DELETE FROM`.
+
+### RFC-04: Global Rate Limit Inheritance & Security Headers
+- Sub-routers mounted via `lumora.mountModule(prefix, router, options)` automatically inherit global `config.rateLimit` when `config.rateLimit.enabled` is `true` (opt out per module with `{ rateLimit: false }` or `{ rateLimit: { disabled: true } }`).
+- Rate-limited endpoints emit `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, and `Retry-After` (on `429`).
+- All responses include `X-Request-Id`, `X-Content-Type-Options: nosniff`, and `X-Frame-Options: DENY`.
+
+### RFC-05: Cryptographic SHA-256 Hash-Chained Audit Ledger
+- Enable globally (`auditHashChain: true` or `database.auditHashChain: true`), per resource (`audit: { hashChain: true }`), or per module (`mountModule(..., { audit: { hashChain: true } })`).
+- Each `_audit_logs` record uses a monotonic UUIDv7 `id`, canonical sorted-key JSON (`canonicalJson`), `tenant_id`, `previous_hash` (`"GENESIS"` for the first entry in a tenant chain), and `chained_hash`.
+- Verify integrity at any time:
+  ```typescript
+  const result = await lumora.database.verifyAuditChain("tenant-1");
+  // { valid: true, checkedCount: 42 } or { valid: false, checkedCount: 12, brokenAtId: "...", expectedHash: "...", actualHash: "..." }
+  ```
+
+### RFC-06: Tenant-Isolated Realtime Channels, SSE Heartbeats & `Last-Event-ID` Replay
+- Publish tenant-scoped events: `lumora.realtime.publishToTenant(tenantId, topic, payload)`.
+- Create tenant-scoped SSE streams: `await lumora.realtime.createTenantSseResponse(tenantId, topic, c, options)`.
+- Resource SSE (`/{resource}/events`) and WebSocket (`/{resource}/ws`) streams automatically isolate events by the subscriber's `tenantId` and `permissions.scope`.
+- SSE connections emit `: ping\n\n` every `heartbeatIntervalMs` (default `25000ms`) and replay missed events from the ring buffer (`maxReplayBuffer`, default `100`) when `Last-Event-ID` header or `?lastEventId=` is supplied.
+
+### RFC-07: Sub-Router OpenAPI 3.1.0 Introspection (`@hono/zod-openapi`)
+- `@astrake/lumora-server` re-exports `OpenAPIHono`, `createRoute`, and `z` from `@hono/zod-openapi`.
+- `lumora.mountModule(prefix, router, options)` automatically merges both `OpenAPIHono` specifications (`getOpenAPI31Document`) and standard Hono `router.routes` into `/__lumora/openapi.json`.
+- `c.var.ok()`, `c.var.list()`, and `c.var.created()` return `Response & TypedResponse<...>`, so they typecheck directly inside `OpenAPIHono.openapi(route, (c) => c.var.ok(...))`.
+
+### RFC-08: Composable Governance Middlewares
 ```typescript
-import embedded from "./_migrations_embedded.js";
-// ...
-migrations: { dir: "./migrations", embeddedFiles: embedded }
+import {
+  OpenAPIHono,
+  requirePolicy,
+  enforceSoD,
+  requireThreshold,
+  requireTimeWindow,
+  type LumoraHonoVariables
+} from "@astrake/lumora-server";
+
+const router = new OpenAPIHono<{ Variables: LumoraHonoVariables }>();
+
+router.post(
+  "/vouchers/:id/approve",
+  requireTimeWindow(async (c) => ({ open: true })),
+  enforceSoD(async (c) => c.req.header("x-creator-id")),
+  requireThreshold({
+    getValue: async (c) => Number(c.req.header("x-amount") ?? 0),
+    tiers: [
+      { maxAmount: 10_000, roles: ["manager"] },
+      { maxAmount: 100_000, roles: ["director", "cfo"] }
+    ]
+  }),
+  requirePolicy((principal) => principal.subject !== "suspended"),
+  (c) => c.var.ok({ approved: true })
+);
 ```
 
-## Common Hallucinations to Avoid
-- **DO NOT** use `db:` in config. Use `database:`.
-- **DO NOT** use `auth.type:`. Use `auth.mode:`.
-- **DO NOT** nest resource fields inside a `schema` property (e.g. `schema: { fields: {} }`). Use top-level `fields: {}`.
-- **DO NOT** assume realtime works out-of-the-box. You MUST set `realtime: { enabled: true }`.
+### RFC-09: Delta Sync (`?since=`) & Idempotency Middleware
+- **Delta Sync:** `GET /{base}/{version}/{resource}?since=2026-10-18T00:00:00.000Z` filters `updated_at >= since`. `id`, `created_at`/`createdAt`, and `updated_at`/`updatedAt` are always filterable and sortable.
+- **Idempotency Middleware:**
+  ```typescript
+  import { idempotency } from "@astrake/lumora-server";
 
-## Procedural APIs and Enterprise Guardrails (New in v0.8.9)
+  router.post("/payments", idempotency({ store: "database", required: true, ttlMs: 86_400_000 }), async (c) => {
+    return c.var.created({ paymentId: "pay_123" });
+  });
+  ```
+  Replays with the same `Idempotency-Key` and identical payload return the cached response with `X-Idempotency-Replayed: true`. Reusing a key with a different payload returns `409 IDEMPOTENCY_CONFLICT`.
 
-Lumora extends its strict protections to procedural APIs mounted via `mountModule`.
+### RFC-10: Deep Readiness Probes, Prometheus Metrics & Graceful Shutdown
+- **`GET /health` & `GET /__lumora/health`:** Runs `SELECT 1` against the active database and returns `{ ok, status: "healthy" | "degraded", name, version, resources, uptimeSeconds, database: { status, client, latencyMs } }` with HTTP `200` (or `503` if DB is unreachable).
+- **`GET /__lumora/metrics`:** Returns JSON telemetry (`requestsTotal`, `errorsTotal`, `avgLatencyMs`, `statusCounts`, `uptimeSeconds`) or Prometheus text exposition format when `?format=prometheus` or `Accept: text/plain` is sent.
+- **Graceful Shutdown:** `await lumora.stop()` (or `await lumora.shutdown()`) runs `onShutdown` hooks, drains in-flight cron tasks, closes active SSE/WebSocket streams, runs `PRAGMA wal_checkpoint(TRUNCATE)` on SQLite, and closes the DB pool.
 
-### mountModule Options
-`lumora.mountModule(path, router, options)` now supports:
-- `protected: boolean` - Requires standard JWT/Static auth.
-- `roles: string[]` - Checks that the user holds one of these roles (requires auth).
-- `rateLimit: boolean | object` - Applies the global or custom rate limit.
-- `audit: boolean` - Auto-audits mutations (POST/PUT/PATCH/DELETE) matching the `_module` resource schema.
+---
 
-### Global Error Boundary
-A global `app.onError` catches unhandled exceptions. 
-Throw `LumoraHttpError` to surface controlled HTTP responses matching the standard `{ok, error, requestId}` envelope:
-```typescript
-import { LumoraHttpError } from "@astrake/lumora-server";
-throw new LumoraHttpError(403, "FORBIDDEN", "You cannot perform this action");
-```
+## 4. Parent Application Migration Guide (`v0.8.10` → `v0.9.0`)
 
-### Request Context Helpers (`c.var`)
-- **`c.var.user`**: Strictly typed as `LumoraPrincipal` (has `id`, `subject`, `roles`, etc.). Use `getPrincipal(c)` to safely extract it.
-- **Envelopes**: Use `c.var.ok(data)`, `c.var.list(data, meta)`, `c.var.created(data)`, `c.var.noContent()`, and `c.var.fail(code, msg, status)` to return standard Lumora JSON structures.
+When upgrading a parent application from `@astrake/lumora-server@0.8.x` to `v0.9.0`, review these **10 code-audited behavioral changes**:
 
-### Validation Middleware
-Map standard schemas (Zod, Yup, etc.) directly to the error envelope:
-```typescript
-import { validate } from "@astrake/lumora-server";
-app.post("/action", validate({ json: z.object({ id: z.string() }) }), (c) => {
-  const data = c.var.valid.json;
-  return c.var.ok(data);
-});
-```
-
-### Database Helpers (`ctx.db`)
-- `ctx.db.page(fragment, { page, pageSize, sort, sortAllowList })`: Wraps SQL fragments with COUNT/LIMIT/OFFSET logic and returns `{ total, page, pageSize, totalPages, hasNextPage, data }`.
-- `ctx.db.tsql`: Tagged template literal that auto-appends tenant scoping rules for multi-tenant applications.
-- **Guardrails**: Global `maxRows` and `statementTimeoutMs` protect database connections from unbounded list operations.
+1. **`mountModule()` Rate-Limit Inheritance (`runtime.ts:1233-1248`):**
+   - *Change:* Sub-routers mounted via `lumora.mountModule(path, router)` now automatically inherit global `config.rateLimit` when `config.rateLimit.enabled: true`.
+   - *Migration:* If a mounted sub-router should **not** be rate-limited when global rate limiting is enabled, pass `{ rateLimit: false }` or `{ rateLimit: { disabled: true } }` to `mountModule()`.
+2. **SQLite `PRAGMA foreign_keys = ON` & `WAL` by Default (`db.ts:360-377`):**
+   - *Change:* SQLite connections now enable `PRAGMA foreign_keys = ON` and `PRAGMA journal_mode = WAL` automatically.
+   - *Migration:* Ensure seed scripts and mutations insert parent rows before child rows, or opt out via `database: { client: "sqlite", url: "...", pragmas: { foreignKeys: false } }`.
+3. **`permissions.allowRecord` Enforcement & `PUT`/`PATCH` Existence Check (`runtime.ts:871-885, 942-951, 1077-1082`):**
+   - *Change:* `permissions.allowRecord(auth, record)` is now actively enforced on `GET /:id`, `PUT /:id`, `PATCH /:id`, and `DELETE /:id` (returning `403 Forbidden` when `false`). Also, `PUT`/`PATCH /:id` now checks record existence and returns `404` *before* running `hooks.beforeUpdate`.
+   - *Migration:* Verify any existing `allowRecord` callbacks return `true` for authorized actors.
+4. **`database.list()` Enforces `excludeFields`, `hidden`, and `multiTenancy` (`db.ts:219-228, 500-515`):**
+   - *Change:* `database.list()` no longer runs `SELECT *`; it projects only non-hidden, non-excluded columns and automatically appends `WHERE tenant_id = ...` when `multiTenancy.enabled` and `db.tenantId` are set.
+   - *Migration:* Remove any workarounds that manually stripped `excludeFields` after `database.list()`.
+5. **Migration Checksum Verification in `status()` & `TRUNCATE` Blocking (`migrations.ts:80-95, 139-143`):**
+   - *Change:* In `production` (`migrations.mode: "strict"`), `status()` now verifies SHA-256 checksums of all previously applied migrations even when `pending.length === 0`. `blockDestructive: true` now also blocks `TRUNCATE`.
+   - *Migration:* Never edit already-applied `.sql` migration files; always add a new numbered `.sql` file.
+6. **`GET /health` Executes Live DB `SELECT 1` Probe (`runtime.ts:1109-1137`):**
+   - *Change:* `GET /health` (and `/__lumora/health`) queries `SELECT 1` and returns HTTP `503` if the database connection is down or closed.
+   - *Migration:* In tests, call `GET /health` *before* calling `await lumora.close()`.
+7. **OpenAPI `/events` and `/ws` Paths Gated on `realtime.enabled` (`docs.ts:31-38`):**
+   - *Change:* `/__lumora/openapi.json` only includes `/{resource}/events` and `/{resource}/ws` when `realtime: { enabled: true }` is configured.
+8. **Realtime SSE `id:` Prefix & Tenant/Scope Isolation (`realtime.ts:90-155`):**
+   - *Change:* SSE frames now include `id: <seq>\n`, and resource SSE/WS streams filter out events from other tenants or scopes.
+9. **Default Security Headers (`runtime.ts:500-502`):**
+   - *Change:* Every response includes `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and `X-Request-Id`.
+   - *Migration:* If a custom route serves HTML intended for `<iframe>` embedding, overwrite `c.header("X-Frame-Options", "SAMEORIGIN")` in that route handler.
+10. **Reserved `?since=` Query Parameter & `mountModule({ audit: true })` Action Values (`db.ts:138-151`, `runtime.ts:1260-1263`):**
+    - *Change:* `?since=<ISO>` filters `updated_at >= since`. `mountModule({ audit: true })` logs normalized actions (`"create"`, `"update"`, `"delete"`) instead of raw HTTP verbs (`"POST"`, `"PUT"`, `"DELETE"`).

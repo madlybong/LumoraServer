@@ -123,7 +123,7 @@ export default defineLumoraConfig({
   },
   routes: { dir: "./routes" },
   migrations: { dir: "./migrations/sqlite" },
-  realtime: { enabled: true, heartbeatIntervalMs: 15000, maxReplayBuffer: 250 },
+  realtime: { enabled: true, heartbeatIntervalMs: 25000, maxReplayBuffer: 100 },
   ai: {
     providers: { gemini: { apiKey: process.env.GEMINI_API_KEY! } },
     defaultProvider: "gemini",

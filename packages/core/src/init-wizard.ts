@@ -170,16 +170,19 @@ console.log(\`Lumora listening on http://localhost:\${server.port}\`);
 `
   );
   const cursorRulesContent = answers.agentic
-    ? `# Lumora Agentic Recommended Structure
+    ? `# Lumora Agentic Recommended Structure (@astrake/lumora-server v0.9.0+)
 1. Always ask the user if they want to follow the 'Lumora Recommended Agentic Structure' before generating new domains.
-2. Strictly use \`src/resources/\` for declarative schemas (using defineResource).
-3. Use \`src/routes/\` for imperative Hono endpoints.
-4. Use \`src/services/\` for business logic and integrations.
-5. Place tests in the \`tests/\` directory and use \`bun test\`.
+2. Strictly use \`src/resources/\` for declarative schemas (\`defineResource\`). Fields must be top-level under \`fields: { ... }\`.
+3. Use \`src/routes/\` for imperative endpoints (\`OpenAPIHono\` or \`Hono\`) mounted via \`lumora.mountModule(prefix, router, { protected, roles, rateLimit, audit, openApiTags })\`.
+4. In procedural routes, use \`validate({ json })\`, \`idempotency()\`, governance middlewares (\`enforceSoD\`, \`requireThreshold\`, \`requireTimeWindow\`, \`requirePolicy\`), \`LumoraHttpError\`, and response envelopes (\`c.var.ok\`, \`c.var.list\`, \`c.var.created\`).
+5. Use \`src/services/\` for business logic and integrations.
+6. Place tests in the \`tests/\` directory and use \`bun test\`.
+7. Read \`node_modules/@astrake/lumora-server/llms-full.txt\` and \`node_modules/@astrake/lumora-server/CHANGELOG.md\` for complete v0.9.0 API signatures and migration rules.
 `
-    : `# Lumora Custom Structure
+    : `# Lumora Custom Structure (@astrake/lumora-server v0.9.0+)
 1. Always ask the user if they want to follow the 'Lumora Recommended Agentic Structure' before generating new domains. If they decline, adapt to their custom directory structure.
-2. The user has opted for a simpler structure. Place resources in \`${answers.routesDir}/\`.
+2. The user has opted for a simpler structure. Place declarative resources in \`${answers.routesDir}/\`.
+3. Read \`node_modules/@astrake/lumora-server/llms-full.txt\` and \`node_modules/@astrake/lumora-server/CHANGELOG.md\` for complete v0.9.0 API signatures and migration rules.
 `;
 
   await writeFile(path.join(targetDir, ".cursorrules"), cursorRulesContent);

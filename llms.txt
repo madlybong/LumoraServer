@@ -1,18 +1,18 @@
 # @astrake/lumora-server
 
-> Slim **Bun + Hono** framework — typed config, file-based resources, auto-generated REST/SSE/WS endpoints.
+> Slim **Bun + Hono** framework — typed config, file-based resources, auto-generated REST/SSE/WS endpoints, cryptographic audit chains, governance middlewares, and OpenAPI 3.1.0 introspection.
 
 ## Quick Start
 ```bash
 bunx init @astrake/lumora-server
 ```
 
-## Core Architectural Invariants (v0.9.0+)
+## Core Architectural Invariants (v0.9.0)
 1. **Config Shape**: `api`, `database`, `auth`, `routes`, `migrations`, `realtime`. Do not use `db:` or `auth.type:`.
 2. **Resource Definition**: `defineResource({ resource, fields, ... })`. Fields must be top-level under `fields: { ... }`.
-3. **Realtime**: `/events` (SSE) and `/ws` (WebSockets) require `realtime: { enabled: true }` in config. Supports `publishToTenant`, `heartbeatIntervalMs`, and `Last-Event-ID` replay (`maxReplayBuffer`).
-4. **Database Parity**: SQLite (auto-configured with WAL + `busy_timeout = 5000` + `VACUUM INTO` auto-backup), MySQL, and PostgreSQL are supported first-class.
-5. **Production Safety**: `migrations.blockDestructive: true` is on by default in prod (`DROP`, `TRUNCATE`, `DELETE FROM` blocked).
+3. **Realtime**: `/events` (SSE) and `/ws` (WebSockets) require `realtime: { enabled: true }` in config. Supports `publishToTenant`, `createTenantSseResponse`, `heartbeatIntervalMs` (default `25000`), and `Last-Event-ID` replay (`maxReplayBuffer`, default `100`).
+4. **Database Parity**: SQLite (auto-configured with WAL + `busy_timeout = 5000` + `foreign_keys = ON` + `VACUUM INTO` auto-backup), MySQL, and PostgreSQL are supported first-class.
+5. **Production Safety**: `migrations.blockDestructive: true` is on by default in prod (`DROP TABLE`, `DROP COLUMN`, `TRUNCATE`, `DELETE FROM` blocked; SHA-256 checksums verified in `status()`).
 6. **Auth Modes**: `disabled` (dev/test only), `static`, `jwt` (supports `claimMapping`, `refreshSecret`, `signLumoraJwt`, `rotateLumoraTokens`), and `custom` (`verify(c)` callback).
 7. **Tamper-Evident Audit**: `audit: { hashChain: true }` or `database.auditHashChain: true` enables SHA-256 hash chaining verified via `database.verifyAuditChain(tenantId?)`.
 
@@ -32,7 +32,7 @@ export default defineLumoraConfig({
     claimMapping: { subject: "sub", roles: "roles", tenantId: "tenantId", scopes: ["companyId"] }
   },
   routes: { dir: "./routes" },
-  realtime: { enabled: true, heartbeatIntervalMs: 15000, maxReplayBuffer: 250 },
+  realtime: { enabled: true, heartbeatIntervalMs: 25000, maxReplayBuffer: 100 },
 });
 ```
 
@@ -55,9 +55,6 @@ export default defineResource({
   }
 });
 ```
-
-## Full Reference
-For full documentation, types, and complete API reference, see [llms-full.txt](./llms-full.txt).
 
 ## Procedural Routes, Governance & OpenAPI Introspection
 When building custom non-CRUD routes using `mountModule`, use `OpenAPIHono` (or `Hono`) along with governance, validation, and idempotency middlewares:
@@ -101,3 +98,12 @@ router.post(
 // lumora.mountModule("/procedural", router, { protected: true, roles: ["manager", "admin"], audit: true, rateLimit: true, openApiTags: ["procedural"] });
 ```
 
+## Upgrading Parent Apps (`v0.8.x` → `v0.9.0`)
+1. **`mountModule()` Rate Limiting**: Inherits global `config.rateLimit` automatically when `config.rateLimit.enabled: true`. Pass `{ rateLimit: false }` to opt out on specific modules.
+2. **SQLite Pragmas**: `PRAGMA foreign_keys = ON` and `WAL` are now enabled by default on SQLite connections (configurable via `database.pragmas`).
+3. **Record Policy & Projections**: `permissions.allowRecord` is enforced on `GET/PUT/PATCH/DELETE /:id`. `database.list()` enforces `excludeFields`, `hidden`, and `multiTenancy`.
+4. **Health & Readiness**: `GET /health` and `GET /__lumora/health` execute `SELECT 1` and return `503` if the DB is disconnected.
+5. **Mount Timing**: Call `lumora.mountModule(...)` during startup before dispatching requests to `lumora.app`.
+
+## Full Reference & Migration Guide
+For complete TypeScript interfaces, all 10 RFC specifications, and the detailed `v0.8.10 → v0.9.0` migration guide, see [llms-full.txt](./llms-full.txt) and [CHANGELOG.md](./CHANGELOG.md).

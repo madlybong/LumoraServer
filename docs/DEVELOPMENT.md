@@ -15,7 +15,7 @@ By default, `bun test` runs only the SQLite/MySQL tests. To run the full test su
    `psql -U postgres -f tools/setup-pg-local.sql`
 3. Copy the `.env` template:
    `cp .env.example .env`
-4. Now `bun test` will execute all 153 tests across 36 files against the local database.
+4. Now `bun test` will execute all 165 tests across 37 files against the local database.
 
 ## Main commands
 
@@ -96,13 +96,13 @@ The starter app is the reference parent application. It should continue to demon
 
 ## Verification rule
 
-Before closing work, run:
+Before closing work or pushing a release, always run the full CI parity pipeline:
 
 ```bash
-bun run check
-bun test
-bun run build
+bun run validate
 ```
+
+(Which runs `bun run check`, `bun test`, `bun run build`, and `bun run version:sync --check` in sequence.)
 
 ## Documentation rule
 

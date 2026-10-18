@@ -146,7 +146,7 @@ async function main() {
 
   const section = sectionLines.join("\n");
 
-  // 6. Prepend to CHANGELOG.md
+  // 6. Prepend to CHANGELOG.md (preserve existing section for this version unless --force is passed)
   const changelogPath = path.join(root, "CHANGELOG.md");
   let existing = "";
   try {
@@ -156,6 +156,13 @@ async function main() {
       "# Changelog\n\nAll notable changes are documented here.\n" +
       "Format: [Keep a Changelog](https://keepachangelog.com/) · " +
       "Commits: [Conventional Commits](https://www.conventionalcommits.org/)\n\n";
+  }
+
+  const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const versionHeadingRegex = new RegExp(`^## \\[${escapedVersion}\\]`, "m");
+  if (versionHeadingRegex.test(existing) && !process.argv.includes("--force")) {
+    console.log(`  ✓ CHANGELOG.md already contains section for [${version}] — preserving existing entry.\n`);
+    return;
   }
 
   // Replace or prepend the Unreleased section
