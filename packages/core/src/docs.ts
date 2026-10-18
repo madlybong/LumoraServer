@@ -28,12 +28,14 @@ export function buildOpenApiDocument(
         delete: { summary: `Delete ${resource.resource}`, tags: [resource.meta?.group ?? resource.resource] }
       })
     };
-    paths[`${basePath}/${config.realtime.sseSuffix}`] = {
-      get: { summary: `SSE stream for ${resource.resource}`, tags: ["realtime"] }
-    };
-    paths[`${basePath}/${config.realtime.websocketSuffix}`] = {
-      get: { summary: `WebSocket stream for ${resource.resource}`, tags: ["realtime"] }
-    };
+    if (config.realtime.enabled) {
+      paths[`${basePath}/${config.realtime.sseSuffix}`] = {
+        get: { summary: `SSE stream for ${resource.resource}`, tags: ["realtime"] }
+      };
+      paths[`${basePath}/${config.realtime.websocketSuffix}`] = {
+        get: { summary: `WebSocket stream for ${resource.resource}`, tags: ["realtime"] }
+      };
+    }
   }
 
   return {

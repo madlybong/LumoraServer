@@ -7,12 +7,14 @@
 bunx init @astrake/lumora-server
 ```
 
-## Core Architectural Invariants (v0.8.2)
+## Core Architectural Invariants (v0.9.0+)
 1. **Config Shape**: `api`, `database`, `auth`, `routes`, `migrations`, `realtime`. Do not use `db:` or `auth.type:`.
 2. **Resource Definition**: `defineResource({ resource, fields, ... })`. Fields must be top-level under `fields: { ... }`.
-3. **Realtime**: `/events` (SSE) and `/ws` (WebSockets) require `realtime: { enabled: true }` in config.
-4. **Database Parity**: SQLite, MySQL, and PostgreSQL are supported first-class.
-5. **Production Safety**: `migrations.blockDestructive: true` is on by default in prod.
+3. **Realtime**: `/events` (SSE) and `/ws` (WebSockets) require `realtime: { enabled: true }` in config. Supports `publishToTenant`, `heartbeatIntervalMs`, and `Last-Event-ID` replay (`maxReplayBuffer`).
+4. **Database Parity**: SQLite (auto-configured with WAL + `busy_timeout = 5000` + `VACUUM INTO` auto-backup), MySQL, and PostgreSQL are supported first-class.
+5. **Production Safety**: `migrations.blockDestructive: true` is on by default in prod (`DROP`, `TRUNCATE`, `DELETE FROM` blocked).
+6. **Auth Modes**: `disabled` (dev/test only), `static`, `jwt` (supports `claimMapping`, `refreshSecret`, `signLumoraJwt`, `rotateLumoraTokens`), and `custom` (`verify(c)` callback).
+7. **Tamper-Evident Audit**: `audit: { hashChain: true }` or `database.auditHashChain: true` enables SHA-256 hash chaining verified via `database.verifyAuditChain(tenantId?)`.
 
 ## Canonical Config Example
 ```typescript
@@ -22,10 +24,15 @@ export default defineLumoraConfig({
   name: "my-app",
   mode: "development",
   api: { base: "/api", version: "v1" },
-  database: { client: "postgresql", url: process.env.PG_URL! },
-  auth: { mode: "jwt", secret: process.env.JWT_SECRET! },
+  database: { client: "postgresql", url: process.env.PG_URL!, auditHashChain: true },
+  auth: {
+    mode: "jwt",
+    secret: process.env.JWT_SECRET!,
+    refreshSecret: process.env.JWT_REFRESH_SECRET,
+    claimMapping: { subject: "sub", roles: "roles", tenantId: "tenantId", scopes: ["companyId"] }
+  },
   routes: { dir: "./routes" },
-  realtime: { enabled: true },
+  realtime: { enabled: true, heartbeatIntervalMs: 15000, maxReplayBuffer: 250 },
 });
 ```
 
@@ -40,9 +47,11 @@ export default defineResource({
     completed: { type: "boolean", default: false, filterable: true },
     user_id: { type: "string", filterable: true }
   },
+  audit: { hashChain: true },
   permissions: {
     scope: { field: "tenant_id" },
-    roles: { "POST": ["admin"] }
+    roles: { "POST": ["admin"] },
+    allowRecord: (auth, record) => record.user_id === auth.subject || auth.roles?.includes("admin") === true
   }
 });
 ```
@@ -50,27 +59,45 @@ export default defineResource({
 ## Full Reference
 For full documentation, types, and complete API reference, see [llms-full.txt](./llms-full.txt).
 
-## Procedural Routes & Guards
-When building custom non-CRUD routes using `mountModule`, always use the standard guards and helpers:
+## Procedural Routes, Governance & OpenAPI Introspection
+When building custom non-CRUD routes using `mountModule`, use `OpenAPIHono` (or `Hono`) along with governance, validation, and idempotency middlewares:
 ```typescript
-import { Hono } from "hono";
-import { validate, getPrincipal, LumoraHttpError } from "@astrake/lumora-server";
-import { z } from "zod";
+import {
+  OpenAPIHono,
+  validate,
+  idempotency,
+  enforceSoD,
+  requireThreshold,
+  getPrincipal,
+  LumoraHttpError,
+  z,
+  type LumoraHonoVariables
+} from "@astrake/lumora-server";
 
-const router = new Hono();
+const router = new OpenAPIHono<{ Variables: LumoraHonoVariables }>();
 
-router.post("/custom", validate({ json: z.object({ query: z.string() }) }), async (c) => {
-  const user = getPrincipal(c);
-  const { query } = c.var.valid.json;
+router.post(
+  "/custom",
+  idempotency({ store: "database", required: true }),
+  enforceSoD((c) => c.req.header("x-creator-id")),
+  requireThreshold({
+    getValue: async (c) => Number(c.req.header("x-amount") ?? 0),
+    tiers: [{ maxAmount: 10_000, roles: ["manager"] }, { maxAmount: 100_000, roles: ["admin"] }]
+  }),
+  validate({ json: z.object({ query: z.string() }) }),
+  async (c) => {
+    const user = getPrincipal(c);
+    const { query } = c.var.valid.json;
 
-  if (query === "error") {
-    throw new LumoraHttpError(400, "BAD_QUERY", "Invalid procedural query.");
+    if (query === "error") {
+      throw new LumoraHttpError(400, "BAD_QUERY", "Invalid procedural query.");
+    }
+
+    return c.var.ok({ user: user.subject, result: query });
   }
+);
 
-  // Use envelope helpers
-  return c.var.ok({ user: user.id, result: query });
-});
-
-// Mounted with options
-// lumora.mountModule("/procedural", router, { protected: true, roles: ["admin"], audit: true, rateLimit: true });
+// Mounted with options (automatically merged into /__lumora/openapi.json)
+// lumora.mountModule("/procedural", router, { protected: true, roles: ["manager", "admin"], audit: true, rateLimit: true, openApiTags: ["procedural"] });
 ```
+

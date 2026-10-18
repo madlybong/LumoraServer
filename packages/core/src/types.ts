@@ -123,7 +123,7 @@ export interface ResourcePermissions {
 export interface AuditLogRecord {
   id: string;
   resource: string;
-  action: "create" | "update" | "delete";
+  action: "create" | "update" | "delete" | (string & {});
   record_id: string;
   actor_subject: string;
   actor_strategy: string;
@@ -132,7 +132,20 @@ export interface AuditLogRecord {
   request_id: string;
   request_path: string;
   timestamp: string;
+  tenant_id?: string | null;
+  previous_hash?: string | null;
+  chained_hash?: string | null;
 }
+
+export interface AuditChainVerifyResult {
+  valid: boolean;
+  checkedCount: number;
+  brokenAtId?: string;
+  expectedHash?: string;
+  actualHash?: string;
+}
+
+export type LumoraSqlTransaction = import("bun").TransactionSQL;
 
 export interface ResourceMeta {
   title?: string;
@@ -180,12 +193,14 @@ export interface ResourceSchema<TFields extends ResourceFields = ResourceFields>
   resource: string;
   table?: string;
   fields: TFields;
+  /** Columns to explicitly exclude from SQL SELECT projection and responses. */
+  excludeFields?: string[];
   auth?: ResourceAuth;
   query?: ResourceQueryOptions;
   hooks?: ResourceHooks<TFields>;
   meta?: ResourceMeta;
   permissions?: ResourcePermissions;
-  audit?: boolean;
+  audit?: boolean | { hashChain?: boolean };
   readOnly?: boolean;
   immutable?: boolean;
   /** Per-resource rate limit override. Merges with global rateLimit config. */
@@ -212,6 +227,17 @@ export interface DefineResourceResult<TFields extends ResourceFields = ResourceF
   kind: "resource";
 }
 
+export interface JwtClaimMapping {
+  /** Claim key for principal subject (default: "sub") */
+  subject?: string;
+  /** Claim key for roles array or single role string (default: "roles") */
+  roles?: string;
+  /** Claim key for primary tenant identifier (default: "tenant_id") */
+  tenantId?: string;
+  /** Additional claim keys to extract into LumoraAuthResult.scope */
+  scopes?: string[];
+}
+
 /**
  * Configuration for authentication.
  * 
@@ -229,15 +255,26 @@ export interface DefineResourceResult<TFields extends ResourceFields = ResourceF
  */
 export type LumoraAuthConfig = {
   protectedPaths?: string[];
+  publicPaths?: string[];
 } & (
   | { mode: "disabled" }
   | { mode: "static"; token: string; header?: string }
   | {
+      mode: "custom";
+      verify: (c: Context) => Promise<LumoraAuthResult | null | undefined> | LumoraAuthResult | null | undefined;
+      afterVerify?: (
+        auth: import("./types").LumoraAuthResult,
+        c: import("hono").Context
+      ) => Promise<Response | void> | Response | void;
+    }
+  | {
       mode: "jwt";
       secret: string;
+      refreshSecret?: string;
       issuer?: string;
       audience?: string;
       clockSkewSeconds?: number;
+      claimMapping?: JwtClaimMapping;
       /**
        * Declare additional JWT payload fields that your application embeds.
        * These fields already pass through in LumoraAuthResult.claims.
@@ -258,6 +295,19 @@ export type LumoraAuthConfig = {
       ) => Promise<Response | void> | Response | void;
     }
 );
+
+export interface SqlitePragmasConfig {
+  /** Default: "WAL" (for file-backed DBs) */
+  journalMode?: "WAL" | "DELETE" | "TRUNCATE" | "PERSIST" | "MEMORY" | "OFF";
+  /** Default: 5000 */
+  busyTimeoutMs?: number;
+  /** Default: "NORMAL" */
+  synchronous?: "OFF" | "NORMAL" | "FULL" | "EXTRA";
+  /** Default: true */
+  foreignKeys?: boolean;
+  /** Default: -64000 (64MB) */
+  cacheSizeKb?: number;
+}
 
 /**
  * Configuration for database connections.
@@ -281,12 +331,31 @@ export type LumoraAuthConfig = {
  * ```
  */
 export type LumoraDatabaseConfig =
-  | { client: "sqlite"; url: string; autoBackup?: boolean; maxRows?: number; onMaxRows?: "throw" | "truncate" | "warn"; statementTimeoutMs?: number }
-  | { client: "mysql"; url: string; autoBackup?: boolean; maxRows?: number; onMaxRows?: "throw" | "truncate" | "warn"; statementTimeoutMs?: number }
+  | {
+      client: "sqlite";
+      url: string;
+      autoBackup?: boolean;
+      maxRetainedBackups?: number;
+      pragmas?: SqlitePragmasConfig;
+      auditHashChain?: boolean;
+      maxRows?: number;
+      onMaxRows?: "throw" | "truncate" | "warn";
+      statementTimeoutMs?: number;
+    }
+  | {
+      client: "mysql";
+      url: string;
+      autoBackup?: boolean;
+      auditHashChain?: boolean;
+      maxRows?: number;
+      onMaxRows?: "throw" | "truncate" | "warn";
+      statementTimeoutMs?: number;
+    }
   | {
       client: "postgresql";
       url: string;
       autoBackup?: boolean;
+      auditHashChain?: boolean;
       pool?: { min?: number; max?: number; idleTimeout?: number };
       schema?: string;
       ssl?: boolean | { ca?: string; cert?: string; key?: string; rejectUnauthorized?: boolean };
@@ -399,6 +468,10 @@ export interface LumoraConfig {
     enabled?: boolean;
     sseSuffix?: string;
     websocketSuffix?: string;
+    /** Interval in ms for SSE `: ping` keep-alive frames (default: 25000, 0 to disable) */
+    heartbeatIntervalMs?: number;
+    /** Max buffered events per resource/topic for Last-Event-ID replay (default: 100) */
+    maxReplayBuffer?: number;
   };
   admin?: {
     enabled?: boolean;
@@ -433,6 +506,8 @@ export interface LumoraConfig {
   schedule?: LumoraScheduledTask[];
   // Migration system config
   migrations?: LumoraMigrationsConfig;
+  /** Enable SHA-256 cryptographic hash chaining on _audit_logs globally */
+  auditHashChain?: boolean;
   rateLimit?: {
     enabled?: boolean;
     windowMs?: number;
@@ -456,6 +531,8 @@ export interface ResolvedLumoraConfig extends Omit<LumoraConfig, "database"> {
     enabled: boolean;
     sseSuffix: string;
     websocketSuffix: string;
+    heartbeatIntervalMs: number;
+    maxReplayBuffer: number;
   };
   logging: {
     level: "silent" | "minimal" | "verbose";
@@ -497,6 +574,7 @@ export interface LumoraAuthResult {
   roles?: string[];
   // LS-9: scope values extracted from JWT claims (e.g. { store_id: "store-kolkata" })
   scope?: Record<string, unknown>;
+  scopes?: Record<string, unknown>;
 }
 
 export interface RequestAudit {
@@ -506,11 +584,14 @@ export interface RequestAudit {
 }
 
 export interface ResourceEventPayload {
+  id?: string;
   resource: string;
   action: "created" | "updated" | "deleted" | "message";
   record?: Record<string, unknown>;
   message?: unknown;
   audit?: RequestAudit;
+  tenantId?: string;
+  scope?: Record<string, unknown>;
 }
 
 export interface TransactionEventPayload {
@@ -546,19 +627,60 @@ export interface OpenApiDocument {
     version: string;
   };
   paths: Record<string, Record<string, unknown>>;
+  components?: Record<string, unknown>;
+  tags?: Array<{ name: string; description?: string }>;
 }
 
-export type SseAuthOptions =
-  | { mode: "bearer-header" }
+export type SseAuthOptions = (
+  | { mode: "bearer-header"; secret?: string }
   | { mode: "query-token"; secret?: string }
-  | { mode: "none" };
+  | { mode: "none" }
+) & {
+  heartbeatIntervalMs?: number;
+  tenantId?: string;
+  scope?: { field: string; value: unknown };
+};
 
 export interface LumoraRealtime {
   publish(payload: ResourceEventPayload): void;
+  publishToTenant(tenantId: string, topic: string, data: unknown): void;
   subscribe(resource: string, listener: (payload: ResourceEventPayload) => void): () => void;
   // LS-7: broadcast a custom event to all connected clients on a topic
   broadcast(topic: string, data: unknown): void;
   createSseResponse(resource: string, c?: Context, options?: SseAuthOptions): Response | Promise<Response>;
+  createTenantSseResponse(
+    tenantId: string,
+    topic: string,
+    c?: Context,
+    options?: SseAuthOptions
+  ): Promise<Response>;
+  close(): void;
+}
+
+export interface MountModuleRouteOpenApi {
+  summary?: string;
+  description?: string;
+  tags?: string[];
+  requestBody?: Record<string, unknown>;
+  responses?: Record<string, unknown>;
+}
+
+export interface MountModuleOptions {
+  protected?: boolean;
+  roles?: string[];
+  rateLimit?: boolean | {
+    disabled?: boolean;
+    max?: number;
+    windowMs?: number;
+  };
+  audit?: boolean | {
+    hashChain?: boolean;
+  };
+  openApiTags?: string[];
+  openApi?: {
+    paths?: Record<string, Record<string, unknown>>;
+    tags?: Array<{ name: string; description?: string }>;
+  };
 }
 
 export interface LumoraInstance {
@@ -577,14 +699,15 @@ export interface LumoraInstance {
   ai?: LumoraAIService;
   database: import("./db").LumoraDatabase;
   // LS-8: scheduler handle for graceful shutdown
-  scheduler?: { stop: () => void };
+  scheduler?: { stop: () => Promise<void> | void };
   // LS-11: structured query executor
   query: import("./query").QueryExecutor;
   /** All loaded resource definitions (inline or file-based). */
   resources: DefineResourceResult[];
   readonly apiPrefix: string;
-  mountModule(path: string, router: Hono<any>, options?: { protected?: boolean; roles?: string[]; rateLimit?: boolean | object; audit?: boolean }): this;
+  mountModule(path: string, router: Hono<any>, options?: MountModuleOptions): this;
   shutdown(): Promise<void>;
+  stop(): Promise<void>;
   onShutdown(callback: () => Promise<void> | void): void;
   close(): Promise<void>;
 }
@@ -594,6 +717,8 @@ export interface AuditLogOpts {
   action: string;
   entityType: string;
   entityId: string;
+  tenantId?: string;
+  hashChain?: boolean;
   /** State of record BEFORE the change. Written to old_value in audit log. */
   before?: Record<string, unknown>;
   /** State of record AFTER the change. Written to new_value in audit log. */
@@ -609,7 +734,7 @@ export interface LumoraModuleContext {
   auth: LumoraAuthConfig;
   ai?: LumoraAIService;
   realtime?: LumoraRealtime;
-  logAudit: (opts: AuditLogOpts, options?: { strict?: boolean }) => Promise<void> | void;
+  logAudit: (opts: AuditLogOpts, options?: { strict?: boolean; hashChain?: boolean }) => Promise<void> | void;
 }
 
 export interface LumoraPrincipal {
@@ -617,6 +742,7 @@ export interface LumoraPrincipal {
   subject: string;
   roles: string[];
   tenantId?: string;
+  scopes?: Record<string, unknown>;
   claims?: Record<string, unknown>;
 }
 
@@ -636,11 +762,16 @@ export type LumoraHonoVariables = {
   user: LumoraPrincipal;
   userRole: string;
   requestId: string;
+  db: import("./db").LumoraDatabase;
+  logAudit: (opts: AuditLogOpts, options?: { strict?: boolean; hashChain?: boolean }) => Promise<void> | void;
   lumoraJson: <T>(data: T, status?: number) => Response;
   lumoraError: (message: string, status?: number) => Response;
-  ok: <T>(data: T, meta?: Record<string, unknown>) => Response;
-  list: <T>(rows: T[], meta: { total: number; page: number; pageSize: number; [key: string]: unknown }) => Response;
-  created: <T>(data: T) => Response;
+  ok: {
+    <T>(data: T): Response & import("hono").TypedResponse<{ ok: boolean; data: T; requestId: string }, 200, "json">;
+    <T, M extends Record<string, unknown>>(data: T, meta: M): Response & import("hono").TypedResponse<{ ok: boolean; data: T; meta: M; requestId: string }, 200, "json">;
+  };
+  list: <T>(rows: T[], meta: { total: number; page: number; pageSize: number; [key: string]: unknown }) => Response & import("hono").TypedResponse<{ ok: boolean; data: T[]; meta: { total: number; page: number; pageSize: number; [key: string]: unknown }; requestId: string }, 200, "json">;
+  created: <T>(data: T) => Response & import("hono").TypedResponse<{ ok: boolean; data: T; requestId: string }, 201, "json">;
   noContent: () => Response;
   fail: (code: string, message: string, status: number, details?: unknown) => Response;
   valid?: {

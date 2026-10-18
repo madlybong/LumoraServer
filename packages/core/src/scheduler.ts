@@ -51,13 +51,13 @@ async function runWithRetry(
 }
 
 export interface SchedulerHandle {
-  stop: () => void;
+  stop: () => Promise<void>;
   readonly taskCount: number;
 }
 
 /**
  * Start all enabled scheduled tasks using Bun.cron.
- * Returns a handle with a stop() function for graceful shutdown.
+ * Returns a handle with a stop() function for graceful shutdown and in-flight task draining.
  */
 export function startScheduler(
   tasks: LumoraScheduledTask[],
@@ -65,39 +65,48 @@ export function startScheduler(
 ): SchedulerHandle {
   const activeTasks = tasks.filter((t) => t.enabled !== false);
   const cronJobs: { stop?: () => void }[] = [];
+  const inFlight = new Set<Promise<void>>();
 
   for (const task of activeTasks) {
     ctx.logger.event("scheduler:start", `task "${task.name}" scheduled with cron "${task.cron}"`);
 
     // Use Bun.cron if available (Bun >= 1.1.x)
-    const cronFn = (Bun as any).cron;
+    const cronFn = (Bun as unknown as { cron?: (expr: string, cb: () => Promise<void>) => { stop?: () => void; unref?: () => void } }).cron;
     if (typeof cronFn === "function") {
       const job = cronFn(task.cron, async () => {
-        ctx.logger.event("scheduler:run", `task "${task.name}" running`);
-        const start = Date.now();
-        try {
-          await runWithRetry(task, ctx);
-          const duration = Date.now() - start;
-          ctx.logger.event("scheduler:done", `task "${task.name}" completed`);
-          if (task.log) await ctx.database.writeCronLog(task.name, duration).catch(() => {});
-        } catch (err) {
-          const duration = Date.now() - start;
-          ctx.logger.error(`scheduler:${task.name}:failed`, err);
-          if (task.onError) {
-            try {
-              await task.onError(err, ctx);
-            } catch (hookErr) {
-              ctx.logger.error(`scheduler:${task.name}:onError`, hookErr);
+        const runPromise = (async () => {
+          ctx.logger.event("scheduler:run", `task "${task.name}" running`);
+          const start = Date.now();
+          try {
+            await runWithRetry(task, ctx);
+            const duration = Date.now() - start;
+            ctx.logger.event("scheduler:done", `task "${task.name}" completed`);
+            if (task.log) await ctx.database.writeCronLog(task.name, duration).catch(() => {});
+          } catch (err) {
+            const duration = Date.now() - start;
+            ctx.logger.error(`scheduler:${task.name}:failed`, err);
+            if (task.onError) {
+              try {
+                await task.onError(err, ctx);
+              } catch (hookErr) {
+                ctx.logger.error(`scheduler:${task.name}:onError`, hookErr);
+              }
             }
+            if (task.log) await ctx.database.writeCronLog(task.name, duration, String(err)).catch(() => {});
           }
-          if (task.log) await ctx.database.writeCronLog(task.name, duration, String(err)).catch(() => {});
+        })();
+        inFlight.add(runPromise);
+        try {
+          await runPromise;
+        } finally {
+          inFlight.delete(runPromise);
         }
       });
       // Bun.cron returns an object with a stop() method or unref()
       if (job && typeof job.stop === "function") {
         cronJobs.push(job);
       } else if (job && typeof job.unref === "function") {
-        cronJobs.push({ stop: () => job.unref() });
+        cronJobs.push({ stop: () => job.unref?.() });
       }
     } else {
       // Fallback: warn that Bun.cron is not available in this runtime
@@ -106,9 +115,12 @@ export function startScheduler(
   }
 
   return {
-    stop: () => {
+    stop: async () => {
       for (const job of cronJobs) {
         job.stop?.();
+      }
+      if (inFlight.size > 0) {
+        await Promise.allSettled(Array.from(inFlight));
       }
       ctx.logger.event("scheduler:stop", `stopped ${cronJobs.length} scheduled task(s)`);
     },

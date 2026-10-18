@@ -55,8 +55,13 @@ There are no other active framework packages in the repo anymore.
 - SFE binary migration embedding (`sfe-prep`)
 - SQLite automatic migration backup
 - Production-safe destructive migration blocking
-- Custom JWT claims and `afterVerify` hooks
-- Opt-in realtime routing (SSE/WS)
+- Custom JWT claims, `claimMapping`, dual-token rotation (`signLumoraJwt`, `rotateLumoraTokens`), `auth.mode: "custom"`, and `afterVerify` hooks
+- Enterprise SQLite pragmas (`WAL`, `busy_timeout = 5000`, `synchronous = NORMAL`, `foreign_keys = ON`) and atomic `VACUUM INTO` auto-backup + restore on failure
+- Tamper-evident SHA-256 hash-chained audit logs (`auditHashChain`, `database.verifyAuditChain()`)
+- Tenant-isolated realtime channels (`publishToTenant`, `createTenantSseResponse`), SSE keep-alive heartbeats, and `Last-Event-ID` ring-buffer replay
+- Sub-router OpenAPI 3.1.0 introspection (`OpenAPIHono`, `createRoute`, `z`, and Hono `router.routes` merging on `mountModule`)
+- Composable governance & idempotency middlewares (`enforceSoD`, `requireThreshold`, `requireTimeWindow`, `requirePolicy`, `idempotency`) and `?since=` delta sync queries
+- Deep readiness probes (`/__lumora/health`), Prometheus/JSON metrics (`/__lumora/metrics`), and graceful drain (`lumora.stop()`)
 - interactive init wizard
 
 ## What the starter app proves
