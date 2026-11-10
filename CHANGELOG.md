@@ -4,6 +4,15 @@
 
 ---
 
+## [0.9.1] — 2026-11-11
+
+### Changed
+
+- Migrated `.github/workflows/release.yml` from static `NPM_TOKEN` authentication to **npm OIDC Trusted Publishing** (`id-token: write`, Node 24, `npm@latest`, and `--provenance` Sigstore build attestations).
+- Added `"directory": "packages/core"` and normalized `"url": "git+https://github.com/madlybong/LumoraServer.git"` in `packages/core/package.json` `repository` metadata for workspace provenance verification.
+
+---
+
 ## [0.9.0] — 2026-10-18
 
 ### ⚠ Breaking & Behavioral Changes (`0.8.10` → `0.9.0`) & Consumer Migration Guide
