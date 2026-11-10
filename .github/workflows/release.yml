@@ -105,9 +105,9 @@ jobs:
         # Only create a new tag if not already triggered by a tag push
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: |
-          git tag "v${{ steps.ver.outputs.version }}"
-          git push origin "v${{ steps.ver.outputs.version }}"
-          git push origin main
+          git tag -f "v${{ steps.ver.outputs.version }}"
+          git push -f origin "v${{ steps.ver.outputs.version }}"
+          git push origin HEAD:main
 
       - name: Extract release notes from CHANGELOG
         id: notes
@@ -133,6 +133,9 @@ jobs:
         working-directory: packages/core
         run: |
           rm -f *.tgz
-          npm publish --provenance --access public
+          if ! npm publish --provenance --access public; then
+            echo "Direct 'npm publish' not permitted by OIDC scope; running 'npm stage publish'..."
+            npm stage publish --provenance --access public
+          fi
 
 
